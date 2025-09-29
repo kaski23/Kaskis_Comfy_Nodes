@@ -31,6 +31,7 @@ class VideoHandler(ComfyNodeABC):
                 "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
                 "matchlength": ("INT", {"default": 3, "min": 1, "max": 99999}),
                 "id_by_splitting": ("BOOLEAN", {"default": True}),
+                "generate_with_and_without_prompt": ("BOOLEAN", {"default": True}),
                 "splitting_symbol": ("STRING", {"default": "_"}),
                 "basepath": ("STRING", {"default": ""}),
             },
@@ -44,13 +45,13 @@ class VideoHandler(ComfyNodeABC):
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
-    def main(self, index, matchlength, id_by_splitting, splitting_symbol, basepath, logging_flags):
+    def main(self, index, matchlength, id_by_splitting, splitting_symbol, basepath, logging_flags, generate_with_and_without_prompt):
         
         self.logging_flags = set(
             flag.strip() for flag in logging_flags.split(",") if flag.strip()
         )
         
-        self.provider = Provider(basepath, matchlength, id_by_splitting, splitting_symbol, self.logging_flags)
+        self.provider = Provider(basepath, matchlength, id_by_splitting, splitting_symbol, self.logging_flags, generate_with_and_without_prompt)
         df = self.provider.gen_df
         
         if index < 0 or index >= len(df):
@@ -133,7 +134,7 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
     
  
 class Provider:
-    def __init__(self, basepath: str = "", matchlength=3, id_by_splitting=True, splitting_symbol="_", debug_flags=None):
+    def __init__(self, basepath: str = "", matchlength=3, id_by_splitting=True, splitting_symbol="_", debug_flags=None, prompt_and_no_prompt = True):
         ### Flags ###
         if debug_flags is None:
             self.debug_flags = set()
@@ -141,6 +142,7 @@ class Provider:
             self.debug_flags = set(debug_flags)
 
         self.log_current = "log_provider"
+        self.prompt_and_no_prompt = prompt_and_no_prompt
 
         ### Object Variables ###
         self.possible_resolutions = [(512, 512), (848, 480), (480, 848), (1024, 1024), (1280, 720), (720, 1280)]
@@ -161,7 +163,7 @@ class Provider:
     # Generiert den Dataframe, der zur Videogenerierung fertig indiziert ist
     ############################################################
 
-    def generate_generation_dataframe(self, df, prompt_and_no_prompt = True):
+    def generate_generation_dataframe(self, df):
 
         #width und height auf Wan anpassen
         df[["width_pad", "height_pad"]] = df.apply(
@@ -172,7 +174,7 @@ class Provider:
         df["controlvideo"] = ""
 
         #Use both prompts and no prompts
-        if prompt_and_no_prompt:
+        if self.prompt_and_no_prompt:
             for _, row in df.iterrows():
                 if row["prompt"] != "":
                     new_row = row.copy()
