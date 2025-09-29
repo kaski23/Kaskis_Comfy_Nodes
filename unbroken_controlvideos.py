@@ -9,15 +9,14 @@ class VideoFileCollector:
     VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".mpeg"}
     FILE_PATTERN = re.compile(r"^(\d_\d{2}_\d{2}[A-Za-z]?)")
 
-    def __init__(self, basepath: str, subfolder: str):
+    def __init__(self, basepath: str, subfolder: str, useUnbrokenFilepatterns: bool = True):
         self.basepath = Path(basepath).expanduser().resolve()
+        self.useUnbrokenFilepatterns = useUnbrokenFilepatterns
 
         sub_path = Path(subfolder)
         if sub_path.is_absolute():
-            # Wenn Subfolder bereits ein kompletter Pfad ist
             self.folder_path = sub_path.resolve()
         else:
-            # Wenn Subfolder nur ein Name wie "8188" ist → an basepath anhängen
             self.folder_path = (self.basepath / sub_path).resolve()
 
         if not self.folder_path.exists():
@@ -31,14 +30,18 @@ class VideoFileCollector:
         files = []
         for file in sorted(self.folder_path.iterdir()):
             if file.is_file():
-                match = self.FILE_PATTERN.match(file.stem)
-                if not match:
-                    raise ValueError(f"Invalid filename format: {file.name}")
-
                 if file.suffix.lower() not in self.VIDEO_EXTENSIONS:
                     raise ValueError(f"File is not a recognized video: {file.name}")
 
-                identifier = match.group(1)
+                if self.useUnbrokenFilepatterns:
+                    match = self.FILE_PATTERN.match(file.stem)
+                    if not match:
+                        raise ValueError(f"Invalid filename format: {file.name}")
+                    identifier = match.group(1)
+                else:
+                    # Einfach Dateiname ohne Endung
+                    identifier = file.stem
+
                 files.append([str(file), identifier])
         return files
 
@@ -51,6 +54,7 @@ class CollectVideoNode(ComfyNodeABC):
                 "basepath": ("STRING", {"default": ""}),
                 "subfolder": ("STRING", {"default": ""}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
+                "useUnbrokenFilepatterns": ("BOOLEAN", {"default": True}),
             }
         }
 
@@ -59,8 +63,8 @@ class CollectVideoNode(ComfyNodeABC):
     FUNCTION = "collect"
     CATEGORY = "Custom"
 
-    def collect(self, basepath: str, subfolder: str, index: int):
-        collector = VideoFileCollector(basepath, subfolder)
+    def collect(self, basepath: str, subfolder: str, index: int, useUnbrokenFilepatterns: bool):
+        collector = VideoFileCollector(basepath, subfolder, useUnbrokenFilepatterns)
 
         if not (0 <= index < len(collector.files)):
             raise IndexError(f"Index {index} out of range, total files: {len(collector.files)}")
