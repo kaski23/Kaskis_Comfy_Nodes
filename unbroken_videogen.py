@@ -36,6 +36,7 @@ class VideoHandler(ComfyNodeABC):
                 "controlvideos_folder": ("STRING", {"default": ""}),
                 "styleframes_folder": ("STRING", {"default": ""}),
                 "prompts_folder": ("STRING", {"default": ""}),
+                "use_prompts_and_noprompts": ("BOOLEAN", {"default": True}),
             },
             "optional": {
                 "logging_flags": ("STRING",{"default": ""}),
@@ -53,6 +54,7 @@ class VideoHandler(ComfyNodeABC):
             matchlength, 
             id_by_splitting, splitting_symbol, 
             basepath, controlvideos_folder, styleframes_folder, prompts_folder, 
+            use_prompts_and_noprompts,
             logging_flags
             ):
         
@@ -64,6 +66,7 @@ class VideoHandler(ComfyNodeABC):
                                 basepath, controlvideos_folder, styleframes_folder, prompts_folder,  
                                 matchlength, 
                                 id_by_splitting, splitting_symbol, 
+                                use_prompts_and_noprompts,
                                 self.logging_flags
                                 )
         df = self.provider.gen_df
@@ -153,6 +156,7 @@ class Provider:
         basepath: str = "", controlvideos_folder: str = "", styleframes_folder: str = "", prompts_folder: str = "", 
         matchlength=3, 
         id_by_splitting=True, splitting_symbol="_", 
+        use_prompts_and_noprompts = True,
         debug_flags=None):
         ### Flags ###
         if debug_flags is None:
@@ -176,7 +180,7 @@ class Provider:
                         debug_flags
         ).master_df
 
-        self.gen_df = self.generate_generation_dataframe(self.mt)
+        self.gen_df = self.generate_generation_dataframe(self.mt, use_prompts_and_noprompts)
 
 
 
@@ -310,10 +314,10 @@ class MasterTable:
     def __init__(
         self, 
         basepath: str = "", controlvideos_folder: str = "", styleframes_folder: str = "", prompts_folder: str = "", 
-        matchlength=1, 
-        id_by_splitting=True, 
-        splitting_symbol="_", 
-        debug_flags=None
+        matchlength = 1, 
+        id_by_splitting = True, 
+        splitting_symbol = "_", 
+        debug_flags = None
         ):
 
         ### Flags ###
@@ -663,7 +667,7 @@ class MasterTable:
             if len(parts) < self.matchlength:
                 raise ValueError(self.print_error(
                     f"generate_id(): \n"
-                    f"Zu wenige '_' im String: erwartet >= {self.matchlength - 1}, übergebener String: {filestem}"
+                    f"Zu wenige '_' im String: erwartet >= {self.matchlength-1}, übergebener String: {filestem}"
                     )
                 )
 
