@@ -33,6 +33,9 @@ class VideoHandler(ComfyNodeABC):
                 "id_by_splitting": ("BOOLEAN", {"default": True}),
                 "splitting_symbol": ("STRING", {"default": "_"}),
                 "basepath": ("STRING", {"default": ""}),
+                "controlvideos_folder": ("STRING", {"default": ""}),
+                "styleframes_folder": ("STRING", {"default": ""}),
+                "prompts_folder": ("STRING", {"default": ""}),
             },
             "optional": {
                 "logging_flags": ("STRING",{"default": ""}),
@@ -44,13 +47,25 @@ class VideoHandler(ComfyNodeABC):
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
-    def main(self, index, matchlength, id_by_splitting, splitting_symbol, basepath, logging_flags):
+    def main(
+            self, 
+            index, 
+            matchlength, 
+            id_by_splitting, splitting_symbol, 
+            basepath, controlvideos_folder, styleframes_folder, prompts_folder, 
+            logging_flags
+            ):
         
         self.logging_flags = set(
             flag.strip() for flag in logging_flags.split(",") if flag.strip()
         )
         
-        self.provider = Provider(basepath, matchlength, id_by_splitting, splitting_symbol, self.logging_flags)
+        self.provider = Provider(
+                                basepath, controlvideos_folder, styleframes_folder, prompts_folder,  
+                                matchlength, 
+                                id_by_splitting, splitting_symbol, 
+                                self.logging_flags
+                                )
         df = self.provider.gen_df
         
         if index < 0 or index >= len(df):
@@ -121,7 +136,7 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
         device: "cpu" oder "cuda"
     
     Returns:
-        Torch-Tensor der Form [n_frames, height, width, 3], dtype=float16, Werte 0.5
+        Torch-Tensor der Form [n_frames, height, width, 3], Werte 0.5
     """
     
     return (
@@ -133,7 +148,12 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
     
  
 class Provider:
-    def __init__(self, basepath: str = "", matchlength=3, id_by_splitting=True, splitting_symbol="_", debug_flags=None):
+    def __init__(
+        self, 
+        basepath: str = "", controlvideos_folder: str = "", styleframes_folder: str = "", prompts_folder: str = "", 
+        matchlength=3, 
+        id_by_splitting=True, splitting_symbol="_", 
+        debug_flags=None):
         ### Flags ###
         if debug_flags is None:
             self.debug_flags = set()
@@ -146,7 +166,10 @@ class Provider:
         self.possible_resolutions = [(512, 512), (848, 480), (480, 848), (1024, 1024), (1280, 720), (720, 1280)]
 
         self.mt = MasterTable(
-                        basepath,
+                        basepath, 
+                        controlvideos_folder, 
+                        styleframes_folder, 
+                        prompts_folder,
                         matchlength,
                         id_by_splitting,
                         splitting_symbol,
@@ -284,7 +307,14 @@ class Provider:
 
 class MasterTable:
 
-    def __init__(self, basepath: str = "", matchlength=1, id_by_splitting=True, splitting_symbol="_", debug_flags=None):
+    def __init__(
+        self, 
+        basepath: str = "", controlvideos_folder: str = "", styleframes_folder: str = "", prompts_folder: str = "", 
+        matchlength=1, 
+        id_by_splitting=True, 
+        splitting_symbol="_", 
+        debug_flags=None
+        ):
 
         ### Flags ###
         if debug_flags is None:
@@ -310,11 +340,16 @@ class MasterTable:
             f"Matchlength \t= {self.matchlength}\n"
             , self.log_current)
 
-        # Kontrolliere, ob alle Ordner da sind
-        expected = {'controls', 'prompts', 'style_img'}
+        # Kontrolliere, ob alle Ordner da sind, wenn ja, anlegen
+        expected = {controlvideos_folder, styleframes_folder, prompts_folder}
         if not expected.issubset(set(self.subfolders)):
             raise ValueError(self.print_error(
                 f"__init__():\nNicht alle Subfolders sind korrekt angelegt. Erwartet werden: {expected}"))
+        
+        self.controlvideos_folder = controlvideos_folder
+        self.styleframes_folder = styleframes_folder
+        self.prompts_folder = prompts_folder
+        
 
         # Kontrolliere, ob die Matchlength passt
         if self.matchlength < 1 or not isinstance(self.matchlength, int):
@@ -370,8 +405,9 @@ class MasterTable:
     ############################################################
 
     def get_styleframe_table(self) -> pd.DataFrame:
+        
         styleframe_df = pd.DataFrame(columns=["id", "styleframe"])
-        style_path = self.basepath / "style_img"
+        style_path = self.basepath / self.styleframes_folder
 
         self.log_current = "log_styleframe_generation"
         self.log(
@@ -419,7 +455,7 @@ class MasterTable:
     def get_controlvideos_table(self) -> pd.DataFrame:
         controlvideos_df = pd.DataFrame(
             columns=["id", "controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "n_frames", "width", "height"])
-        control_path = self.basepath / "controls"
+        control_path = self.basepath / self.controlvideos_folder
 
         self.log_current = "log_controlvideo_generation"
         self.log(
@@ -518,7 +554,7 @@ class MasterTable:
     ############################################################
 
     def get_prompts_table(self) -> pd.DataFrame:
-        prompt_path = self.basepath / "prompts"
+        prompt_path = self.basepath / self.prompts_folder
         self.log_current = "log_prompt_generation"
 
         self.log(
