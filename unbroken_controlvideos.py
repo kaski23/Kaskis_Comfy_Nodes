@@ -74,7 +74,7 @@ class CollectVideoNode(ComfyNodeABC):
         video_dict = VideoFromFile(file_path)
         
         if enableDebugMsg:
-            print(f"Unbroken Video Handler:")
-            print(f"Using filepath: {file_path} with file-ID {file_id}")
+            print(f"Unbroken Video Handler: Using filepath: {file_path} with file-ID {file_id}")
+            print(f"")
         
         return file_id, video_dict
