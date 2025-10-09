@@ -55,6 +55,7 @@ class CollectVideoNode(ComfyNodeABC):
                 "subfolder": ("STRING", {"default": ""}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
                 "useUnbrokenFilepatterns": ("BOOLEAN", {"default": True}),
+                "enableDebugMsg": ("BOOLEAN", {"default": False}),
             }
         }
 
@@ -63,7 +64,7 @@ class CollectVideoNode(ComfyNodeABC):
     FUNCTION = "collect"
     CATEGORY = "Custom"
 
-    def collect(self, basepath: str, subfolder: str, index: int, useUnbrokenFilepatterns: bool):
+    def collect(self, basepath: str, subfolder: str, index: int, useUnbrokenFilepatterns: bool, enableDebugMsg: bool):
         collector = VideoFileCollector(basepath, subfolder, useUnbrokenFilepatterns)
 
         if not (0 <= index < len(collector.files)):
@@ -71,5 +72,9 @@ class CollectVideoNode(ComfyNodeABC):
 
         file_path, file_id = collector.files[index]
         video_dict = VideoFromFile(file_path)
-
+        
+        if enableDebugMsg:
+            print(f"Unbroken Video Handler:")
+            print(f"Using filepath: {file_path} with file-ID {file_id}")
+        
         return file_id, video_dict
