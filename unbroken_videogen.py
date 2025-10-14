@@ -207,10 +207,9 @@ class Provider:
                     df.loc[len(df)] = new_row
 
         #Filter Table for unavailable Controlvideos
-        df["controlvideo"] = df["controlvideo_combined"].where(
-            df["controlvideo_combined"] != "",
-            df["controlvideo_depth"]
-        )
+        df["controlvideo"] = df["controlvideo_combined"]
+        df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_depth"]
+        df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_normal"]
 
         df = df.drop(["controlvideo_combined", "controlvideo_normal", "controlvideo_depth"], axis = 1)
 
@@ -385,10 +384,7 @@ class MasterTable:
             .merge(prompts_table, on="id", how="left")
         )
         
-        self.master_df["prompt"]                    = self.master_df["prompt"].fillna("")
-        self.master_df["controlvideo_combined"]     = self.master_df["controlvideo_combined"].fillna("")
-        self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
-        self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
+        self.consolidate()
 
         self.log(
             f"\n\n"
@@ -396,14 +392,88 @@ class MasterTable:
             f"{self.master_df}"
             , "log_init")
             
+        
+
+    ############################################################
+    # Checkt den Master-df auf Fehler
+    # Erwartet wird ein df mit id, styleframe, 
+    # controlvideo_depth, controlvideo_normal, controlvideo_combined, n_frames, width, height
+    # prompt
+    ############################################################
+    def consolidate(self):
+        # Checkt, ob überhaupt etwas im DF steht
         if self.master_df.empty:
             raise ValueError(self.print_error(
                 "master_df ist leer – vermutlich keine gemeinsamen IDs gefunden "
                 "(prüfe matchlength oder ID-Generierung)"
             ))
+        
+        
+        # Checkt, ob die kritischen Spalten vorhanden sind
+        required_columns = [
+                        "id", "styleframe", "controlvideo_combined", "controlvideo_normal", 
+                        "controlvideo_depth", "n_frames", "width", "height"
+                        ]
+                        
+        for col in required_columns:
+            if (col == "controlvideo_combined") or (col == "controlvideo_normal") or (col == "controlvideo_depth"):
+                if (("controlvideo_combined"    not in self.master_df.columns) 
+                and ("controlvideo_depth"       not in self.master_df.columns)
+                and ("controlvideo_normal"      not in self.master_df.columns)):
+                    raise ValueError(self.print_error(
+                        "master_df enthält keine Controlvideos"
+                    ))
+                
+            elif col not in self.master_df.columns:
+                raise ValueError(self.print_error(
+                        f"master_df enthält keine Spalte {col}"
+                    ))
+                    
+                    
+        # Nachträglich nichtkritische Spalten ergänzen, sollte eine Spalte nicht vorhanden sein keine Einträge stehen
+        for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "prompt"]:
+            if col not in self.master_df.columns:
+                self.master_df[col] = pd.NA
+                
+                    
+        # Checkt, ob alle kritischen Infos durchgehend vorhanden sind
+        if self.master_df["id"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keine ids an mindestens einer Stelle"
+                    ))
+        
+        if self.master_df["n_frames"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keine frameanzahl an mindestens einer Stelle"
+                    ))
+                   
+        if self.master_df["width"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keine width an mindestens einer Stelle"
+                    ))
+                    
+        if self.master_df["height"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keine height an mindestens einer Stelle"
+                    ))
 
-
-
+        # Checkt, ob es mindestens ein Controlvideo pro Video gibt
+        cols = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth"]
+        if not (self.master_df[cols].notna().any(axis=1).all()):
+            raise ValueError(self.print_error(
+                    "master_df enthält keine Controlvideos an mindestens einer Stelle"
+                ))
+              
+              
+        
+        # Aufräumen
+        self.master_df["prompt"]                    = self.master_df["prompt"].fillna("")
+        self.master_df["controlvideo_combined"]     = self.master_df["controlvideo_combined"].fillna("")
+        self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
+        self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
+        
+        
+        
     ############################################################
     # Generiert einen DataFrame für die Styleframes
     ############################################################
@@ -546,10 +616,7 @@ class MasterTable:
         controlvideos_df = controlvideos_df.groupby("id").first().reset_index()
         
         
-        # Nachträglich Spalten ergänzen, sollten in einer Spalte keine Einträge stehen
-        for col in ["id", "controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "n_frames", "width", "height"]:
-            if col not in controlvideos_df.columns:
-                controlvideos_df[col] = pd.NA
+        
 
 
         self.log(f"\n"
