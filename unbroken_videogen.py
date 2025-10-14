@@ -237,7 +237,7 @@ class Provider:
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
             print(f"Unbroken Videohandler / MasterTable-Class:")
-            print msg
+            print(msg)
             print(f"Log-Categories {flags}\n")
 
     ############################################################
@@ -698,7 +698,7 @@ class MasterTable:
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
             print(f"Unbroken Videohandler / MasterTable-Class:")
-            print msg
+            print(msg)
             print(f"Log-Categories {flags}\n")
 
     ############################################################
