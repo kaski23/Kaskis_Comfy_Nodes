@@ -270,7 +270,7 @@ class Provider:
     def print_error(self, msg):
         return "Unbroken Videohandler / Provider-Class: " + msg
     
-    def optimal_frame_length(n_frames: int) -> int:
+    def optimal_frame_length(self, n_frames: int) -> int:
         if (n_frames - 1)%4 == 0:
             return n_frames
         else:
