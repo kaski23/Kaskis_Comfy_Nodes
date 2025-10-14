@@ -219,7 +219,11 @@ class Provider:
         )
         
         #Kürzt das Video auf die optimale Framerate
-        df["n_frames"] = (df["n_frames"] // 4) * 4 + 1
+        
+        df["n_frames"] = df.apply(
+            lambda r: self.optimal_frame_length(r["n_frames"]),
+            axis=1
+            )
 
         df["controlvideo"] = ""
 
@@ -265,7 +269,12 @@ class Provider:
 
     def print_error(self, msg):
         return "Unbroken Videohandler / Provider-Class: " + msg
-        
+    
+    def optimal_frame_length(n_frames: int) -> int:
+        if (n_frames - 1)%4 == 0:
+            return n_frames
+        else:
+            return (n_frames // 4) * 4 + 1
 
     ############################################################
     # Generiert die optimale Zielauflösung
