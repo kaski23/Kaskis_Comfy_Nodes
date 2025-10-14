@@ -161,6 +161,7 @@ class Provider:
         ### Flags ###
         if debug_flags is None:
             self.debug_flags = set()
+            print("Unbroken-Videohandler: Possible debug-flags are: log_provider,log_utils,log_prompt_generation, log_init, log_styleframe_generation, log_controlvideo_generation, log_prompt_generation, warnings")
         else:
             self.debug_flags = set(debug_flags)
 
@@ -230,14 +231,16 @@ class Provider:
 
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
-            print(msg)
+            print(f"Unbroken Videohandler / MasterTable-Class:")
+            print msg
+            print(f"Log-Categories {flags}\n")
 
     ############################################################
     # Generiert Error-Prints
     ############################################################
 
     def print_error(self, msg):
-        return "in Provider: " + msg
+        return "Unbroken Videohandler / Provider-Class: " + msg
 
     ############################################################
     # Generiert die optimale Zielauflösung
@@ -322,6 +325,7 @@ class MasterTable:
         ### Flags ###
         if debug_flags is None:
             self.debug_flags = set()
+            print("Unbroken-Videohandler: Possible debug-flags are: log_provider,log_utils,log_prompt_generation, log_init, log_styleframe_generation, log_controlvideo_generation, log_prompt_generation, warnings")
         else:
             self.debug_flags = set(debug_flags)
 
@@ -688,14 +692,16 @@ class MasterTable:
 
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
-            print(msg)
+            print(f"Unbroken Videohandler / MasterTable-Class:")
+            print msg
+            print(f"Log-Categories {flags}\n")
 
     ############################################################
     # Generiert Error-Prints
     ############################################################
 
     def print_error(self, msg):
-        return "in MasterTable: " + msg
+        return "Unbroken Videohandler / MasterTable-Class: " + msg
 
     ############################################################
     # Gibt die Zahl x zurück, die in einem String in der Form
