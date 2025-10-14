@@ -43,8 +43,8 @@ class VideoHandler(ComfyNodeABC):
             }
         }
     
-    RETURN_TYPES = ("STRING", "VIDEO", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
+    RETURN_TYPES = ("STRING", "VIDEO", "IMAGE", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","first_styleframe", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -84,6 +84,11 @@ class VideoHandler(ComfyNodeABC):
         height = df.iloc[index]["height_pad"]
         n_frames = df.iloc[index]["n_frames"]
         
+        first_styleframe_tupel = df.iloc[index]["styleframe"][0]
+        _, frame_path = first_styleframe_tupel
+        first_styleframe = load_image_as_comfy_tensor(frame_path, df.iloc[index]["width"], df.iloc[index]["height"])
+        
+        
         stylevideo, mask = generate_stylevideo(
                                 df.iloc[index]["styleframe"], 
                                 df.iloc[index]["width"], 
@@ -94,7 +99,7 @@ class VideoHandler(ComfyNodeABC):
         
         
         
-        return video_id, controlvideo, stylevideo, mask, prompt, width, height, n_frames
+        return video_id, controlvideo, stylevideo, first_styleframe, mask, prompt, width, height, n_frames
         
         
          
