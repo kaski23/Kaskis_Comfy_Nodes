@@ -82,7 +82,7 @@ class VideoHandler(ComfyNodeABC):
         prompt = df.iloc[index]["prompt"]
         width = df.iloc[index]["width_pad"]
         height = df.iloc[index]["height_pad"]
-        n_frames = df.iloc[index]["n_frames_optim"]
+        n_frames = df.iloc[index]["n_frames"]
         
         first_styleframe_tupel = df.iloc[index]["styleframe"][0]
         _, frame_path = first_styleframe_tupel
@@ -107,12 +107,20 @@ class VideoHandler(ComfyNodeABC):
 
 
 def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int):
-    
     video, mask = generate_wan_nullInput(width, height, n_frames)
-    
+
     for frame_no, path in styleframe_tupel:
-        video[frame_no] = load_image_as_comfy_tensor(path, width, height)[0]
-        mask[frame_no] = torch.full((1, height, width), 1.0)[0]
+        # Index-Handling
+        if frame_no < 0:
+            target_index = 0
+        elif frame_no >= n_frames:
+            target_index = n_frames - 1
+        else:
+            target_index = frame_no
+
+        # Styleframe einsetzen
+        video[target_index] = load_image_as_comfy_tensor(path, width, height)[0]
+        mask[target_index] = torch.full((1, height, width), 1.0)[0]
 
     return video, mask
     
@@ -203,7 +211,7 @@ class Provider:
         )
         
         #Kürzt das Video auf die optimale Framerate
-        df["n_frames_optim"] = (df["n_frames"] // 4) * 4 + 1
+        df["n_frames"] = (df["n_frames"] // 4) * 4 + 1
 
         df["controlvideo"] = ""
 
