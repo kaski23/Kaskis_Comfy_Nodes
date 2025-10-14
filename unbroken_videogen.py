@@ -57,7 +57,7 @@ class VideoHandler(ComfyNodeABC):
             use_prompts_and_noprompts,
             logging_flags
             ):
-        
+        # Logging - Setup
         self.logging_flags = set(
             flag.strip() for flag in logging_flags.split(",") if flag.strip()
         )
@@ -71,12 +71,14 @@ class VideoHandler(ComfyNodeABC):
                                 )
         df = self.provider.gen_df
         
+        # Index-Plausibility-Check-
         if index < 0 or index >= len(df):
             raise IndexError(
                 f"Index {index} liegt außerhalb des gültigen Bereichs (0 – {len(df)-1})"
             )
                 
         
+        # Setup der einzelnen Return-Variablen
         video_id        = df.iloc[index]["id"]
         controlvideo    = load_video_as_comfy_tensor(df.iloc[index]["controlvideo"])
         prompt          = df.iloc[index]["prompt"]
@@ -98,6 +100,10 @@ class VideoHandler(ComfyNodeABC):
                                 n_frames
         )
         
+        # Kürzen der Videotensoren auf die optimale Frame-Anzahl
+        controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_index >= n_frames_optim)
+        stylevideo   = shorten_tensor(stylevideo, n_frames_optim, largest_index >= n_frames_optim)
+        mask         = shorten_tensor(mask, n_frames_optim, largest_index >= n_frames_optim)
         
         
         return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames_optim)
@@ -166,15 +172,33 @@ def load_video_as_comfy_tensor(path: str, to_float: bool = True) -> torch.Tensor
     Returns:
         torch.Tensor: Tensor im Format (frames, height, width, channels)
     """
-    # ffprobe: Videoauflösung und Frames holen
+    # ffprobe: exakte Frameanzahl und Auflösung holen
     probe_cmd = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,nb_frames",
-        "-of", "default=noprint_wrappers=1:nokey=1", path
+        "ffprobe",
+        "-v", "error",
+        "-count_frames",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=nb_read_frames,width,height",
+        "-of", "json",
+        path
     ]
-    out = subprocess.check_output(probe_cmd).decode().splitlines()
-    width, height, n_frames = map(int, out)
-    
+    result = subprocess.run(
+        probe_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True
+    )
+    info = json.loads(result.stdout)
+    stream = info["streams"][0]
+
+    n_frames = int(stream.get("nb_read_frames", 0))
+    width = int(stream.get("width", 0))
+    height = int(stream.get("height", 0))
+
+    if n_frames == 0 or width == 0 or height == 0:
+        raise ValueError(f"Konnte Videoinfos nicht ermitteln: {path}")
+
     # ffmpeg: rohe RGB-Frames auslesen
     cmd = [
         "ffmpeg",
@@ -184,20 +208,24 @@ def load_video_as_comfy_tensor(path: str, to_float: bool = True) -> torch.Tensor
         "-vcodec", "rawvideo",
         "-"
     ]
-    pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
-    
-    # Daten einlesen
+    pipe = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8
+    )
+
     raw = pipe.stdout.read(width * height * 3 * n_frames)
     video = np.frombuffer(raw, dtype=np.uint8)
-    video = video.reshape((n_frames, height, width, 3))
-    
-    # In Torch-Tensor konvertieren
+
+    try:
+        video = video.reshape((n_frames, height, width, 3))
+    except ValueError:
+        raise ValueError(f"Video konnte nicht in Shape gebracht werden: "
+                         f"erwartet {n_frames}x{height}x{width}x3, "
+                         f"aber Datenlänge war {video.size}")
+
     if to_float:
-        tensor = torch.from_numpy(video).float() / 255.0
+        return torch.from_numpy(video).float() / 255.0
     else:
-        tensor = torch.from_numpy(video).byte()
-    
-    return tensor
+        return torch.from_numpy(video).byte()
 
 
 def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Tensor, torch.Tensor):
