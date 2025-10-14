@@ -457,8 +457,7 @@ class MasterTable:
     ############################################################
 
     def get_controlvideos_table(self) -> pd.DataFrame:
-        controlvideos_df = pd.DataFrame(
-            columns=["id", "controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "n_frames", "width", "height"])
+        
         control_path = self.basepath / self.controlvideos_folder
 
         self.log_current = "log_controlvideo_generation"
@@ -545,6 +544,13 @@ class MasterTable:
             )
 
         controlvideos_df = controlvideos_df.groupby("id").first().reset_index()
+        
+        
+        # Nachträglich Spalten ergänzen, sollten in einer Spalte keine Einträge stehen
+        for col in ["id", "controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "n_frames", "width", "height"]:
+            if col not in controlvideos_df.columns:
+                controlvideos_df[col] = pd.NA
+
 
         self.log(f"\n"
                  f"generated Dataframe:\n"
