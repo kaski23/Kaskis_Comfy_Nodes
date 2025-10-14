@@ -43,7 +43,7 @@ class VideoHandler(ComfyNodeABC):
             }
         }
     
-    RETURN_TYPES = ("STRING", "VIDEO", "IMAGE", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
+    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
     RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
@@ -77,12 +77,13 @@ class VideoHandler(ComfyNodeABC):
             )
                 
         
-        video_id = df.iloc[index]["id"]
-        controlvideo = VideoFromFile(df.iloc[index]["controlvideo"])
-        prompt = df.iloc[index]["prompt"]
-        width = df.iloc[index]["width_pad"]
-        height = df.iloc[index]["height_pad"]
-        n_frames = df.iloc[index]["n_frames"]
+        video_id        = df.iloc[index]["id"]
+        controlvideo    = load_video_as_comfy_tensor(df.iloc[index]["controlvideo"])
+        prompt          = df.iloc[index]["prompt"]
+        width           = df.iloc[index]["width_pad"]
+        height          = df.iloc[index]["height_pad"]
+        n_frames        = df.iloc[index]["n_frames"]
+        n_frames_optim  = df.iloc[index]["n_frames_optim"]
         
         styleframes = get_styleframes(
                                 df.iloc[index]["styleframe"], 
@@ -90,17 +91,16 @@ class VideoHandler(ComfyNodeABC):
                                 df.iloc[index]["height"],
         )
         
-        stylevideo, mask = generate_stylevideo(
+        stylevideo, mask, largest_index = generate_stylevideo(
                                 df.iloc[index]["styleframe"], 
                                 df.iloc[index]["width"], 
                                 df.iloc[index]["height"], 
                                 n_frames
         )
-                            
         
         
         
-        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames_optim)
         
 
 
@@ -117,6 +117,7 @@ def get_styleframes(styleframe_tupel, width: int, height: int) -> torch.Tensor:
 
 def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int):
     video, mask = generate_wan_nullInput(width, height, n_frames)
+    indices = []
 
     for frame_no, path in styleframe_tupel:
         # Index-Handling
@@ -129,9 +130,12 @@ def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int
 
         # Styleframe einsetzen
         video[target_index] = load_image_as_comfy_tensor(path, width, height)[0]
-        mask[target_index] = torch.full((1, height, width), 1.0)[0]
+        mask[target_index]  = torch.full((1, height, width), 1.0)[0]
+        indices.append(target_index)
+    
+    largest_index = max(indices)
 
-    return video, mask
+    return video, mask, largest_index
     
 
 def load_image_as_comfy_tensor(path: str, width: int, height: int) -> torch.Tensor:
@@ -146,6 +150,52 @@ def load_image_as_comfy_tensor(path: str, width: int, height: int) -> torch.Tens
         arr = np.array(img, dtype=np.float32) / 255.0
 
     tensor = torch.from_numpy(arr)[None, ...]  # [1, H, W, 3]
+    
+    return tensor
+  
+  
+def load_video_as_comfy_tensor(path: str, to_float: bool = True) -> torch.Tensor:
+    """
+    Lädt ein Video mithilfe von ffmpeg und gibt es als ComfyUI-kompatiblen Tensor zurück.
+    
+    Args:
+        path (str): Pfad zur Videodatei.
+        to_float (bool): Falls True, wird der Tensor auf [0,1] normalisiert (float32).
+                         Falls False, bleibt er als uint8 [0..255].
+    
+    Returns:
+        torch.Tensor: Tensor im Format (frames, height, width, channels)
+    """
+    # ffprobe: Videoauflösung und Frames holen
+    probe_cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,nb_frames",
+        "-of", "default=noprint_wrappers=1:nokey=1", path
+    ]
+    out = subprocess.check_output(probe_cmd).decode().splitlines()
+    width, height, n_frames = map(int, out)
+    
+    # ffmpeg: rohe RGB-Frames auslesen
+    cmd = [
+        "ffmpeg",
+        "-i", path,
+        "-f", "rawvideo",
+        "-pix_fmt", "rgb24",
+        "-vcodec", "rawvideo",
+        "-"
+    ]
+    pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=10**8)
+    
+    # Daten einlesen
+    raw = pipe.stdout.read(width * height * 3 * n_frames)
+    video = np.frombuffer(raw, dtype=np.uint8)
+    video = video.reshape((n_frames, height, width, 3))
+    
+    # In Torch-Tensor konvertieren
+    if to_float:
+        tensor = torch.from_numpy(video).float() / 255.0
+    else:
+        tensor = torch.from_numpy(video).byte()
     
     return tensor
 
@@ -169,6 +219,30 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
             torch.full((n_frames, height, width), 0.0)
     )
 
+
+def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: bool = True) -> torch.Tensor:
+    """
+    Kürzt einen Tensor entlang der 0-ten Dimension (Batch).
+    
+    Args:
+        t (torch.Tensor): Eingabetensor.
+        desired_length (int): Länge, auf die gekürzt werden soll.
+        drop_first_entries (bool): 
+            - True  -> droppt die ersten Einträge, behält die letzten.
+            - False -> droppt die letzten Einträge, behält die ersten.
+    
+    Returns:
+        torch.Tensor: Gekürzter Tensor.
+    """
+    if desired_length > t.shape[0]:
+        raise ValueError(
+            f"desired_length ({desired_length}) ist größer als Batch-Länge ({t.shape[0]})"
+        )
+    
+    if drop_first_entries:
+        return t[-desired_length:]   # behält die letzten
+    else:
+        return t[:desired_length]    # behält die ersten
 
     
  
@@ -219,9 +293,8 @@ class Provider:
             axis=1, result_type="expand"
         )
         
-        #Kürzt das Video auf die optimale Framerate
-        
-        df["n_frames"] = df.apply(
+        #Berechnet die optimale Framerate
+        df["n_frames_optim"] = df.apply(
             lambda r: self.optimal_frame_length(r["n_frames"]),
             axis=1
             )
