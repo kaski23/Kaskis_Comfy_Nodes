@@ -99,7 +99,7 @@ class VideoHandler(ComfyNodeABC):
         
         
         
-        return video_id, controlvideo, stylevideo, first_styleframe, mask, prompt, width, height, n_frames
+        return str(video_id), controlvideo, stylevideo, first_styleframe, mask, str(prompt), int(width), int(height), int(n_frames)
         
         
          
