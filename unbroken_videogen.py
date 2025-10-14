@@ -82,7 +82,7 @@ class VideoHandler(ComfyNodeABC):
         prompt = df.iloc[index]["prompt"]
         width = df.iloc[index]["width_pad"]
         height = df.iloc[index]["height_pad"]
-        n_frames = df.iloc[index]["n_frames"]
+        n_frames = df.iloc[index]["n_frames_optim"]
         
         first_styleframe_tupel = df.iloc[index]["styleframe"][0]
         _, frame_path = first_styleframe_tupel
@@ -201,6 +201,9 @@ class Provider:
             lambda r: self.optimal_video_res(r["width"], r["height"]),
             axis=1, result_type="expand"
         )
+        
+        #Kürzt das Video auf die optimale Framerate
+        df["n_frames_optim"] = (df["n_frames"] // 4) * 4 + 1
 
         df["controlvideo"] = ""
 
@@ -246,6 +249,7 @@ class Provider:
 
     def print_error(self, msg):
         return "Unbroken Videohandler / Provider-Class: " + msg
+        
 
     ############################################################
     # Generiert die optimale Zielauflösung
