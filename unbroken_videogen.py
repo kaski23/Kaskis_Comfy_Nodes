@@ -44,7 +44,7 @@ class VideoHandler(ComfyNodeABC):
         }
     
     RETURN_TYPES = ("STRING", "VIDEO", "IMAGE", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","first_styleframe", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -84,10 +84,11 @@ class VideoHandler(ComfyNodeABC):
         height = df.iloc[index]["height_pad"]
         n_frames = df.iloc[index]["n_frames"]
         
-        first_styleframe_tupel = df.iloc[index]["styleframe"][0]
-        _, frame_path = first_styleframe_tupel
-        first_styleframe = load_image_as_comfy_tensor(frame_path, df.iloc[index]["width"], df.iloc[index]["height"])
-        
+        styleframes = get_styleframes(
+                                df.iloc[index]["styleframe"], 
+                                df.iloc[index]["width"], 
+                                df.iloc[index]["height"],
+        )
         
         stylevideo, mask = generate_stylevideo(
                                 df.iloc[index]["styleframe"], 
@@ -99,11 +100,18 @@ class VideoHandler(ComfyNodeABC):
         
         
         
-        return str(video_id), controlvideo, stylevideo, first_styleframe, mask, str(prompt), int(width), int(height), int(n_frames)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames)
         
-        
-         
-       
+
+
+def get_styleframes(styleframe_tupel, width: int, height: int):
+    styleframes = []
+    for _, path in styleframe_tupel:
+        styleframes.append(
+            load_image_as_comfy_tensor(path, width, height)[0]
+        )
+
+    return styleframes
 
 
 def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int):
