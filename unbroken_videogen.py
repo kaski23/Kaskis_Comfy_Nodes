@@ -104,14 +104,15 @@ class VideoHandler(ComfyNodeABC):
         
 
 
-def get_styleframes(styleframe_tupel, width: int, height: int):
-    styleframes = []
+def get_styleframes(styleframe_tupel, width: int, height: int) -> torch.Tensor:
+    tensors = []
     for _, path in styleframe_tupel:
-        styleframes.append(
-            load_image_as_comfy_tensor(path, width, height)[0]
-        )
+        # load_image_as_comfy_tensor gibt [1, H, W, 3] zurück
+        tensor = load_image_as_comfy_tensor(path, width, height)  
+        tensors.append(tensor)  
 
-    return styleframes
+    # Liste von [1, H, W, 3] → [N, H, W, 3]
+    return torch.cat(tensors, dim=0)
 
 
 def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int):
