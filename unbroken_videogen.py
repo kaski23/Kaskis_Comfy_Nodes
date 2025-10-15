@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 import numpy as np
 import torch
+from datetime import datetime
 
 import folder_paths
 from comfy.comfy_types import IO, ComfyNodeABC
@@ -106,6 +107,8 @@ class VideoHandler(ComfyNodeABC):
         mask         = shorten_tensor(mask, n_frames_optim, largest_index >= n_frames_optim)
         
         
+        print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
+
         return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames_optim)
         
 
@@ -248,7 +251,7 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
     )
 
 
-def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: bool = True) -> torch.Tensor:
+def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: bool = False) -> torch.Tensor:
     """
     Kürzt einen Tensor entlang der 0-ten Dimension (Batch).
     
@@ -526,7 +529,7 @@ class MasterTable:
 
         self.log(
             f"\n\n"
-            f"GENERATED MASTER-DATAFRAME:"
+            f"GENERATED MASTER-DATAFRAME:\n"
             f"{self.master_df}"
             , "log_init")
             
@@ -649,7 +652,7 @@ class MasterTable:
         styleframe_df = styleframe_df.groupby("id")["styleframe"].agg(list).reset_index()
 
         self.log(f"\n"
-                 f"generated Dataframe:\n"
+                 f"generated Styleframes-Dataframe:\n"
                  f"{styleframe_df}"
                  , "log_styleframe_generation")
 
@@ -660,11 +663,37 @@ class MasterTable:
 
         return styleframe_df
 
-    ############################################################
-    # Generiert einen DataFrame für die Controlvideos
-    ############################################################
-
     def get_controlvideos_table(self) -> pd.DataFrame:
+        """
+        Generiert einen DataFrame, der Controlvideo-Dateipfade den File-IDs zuordnet.
+        
+        Es werden sämtliche Dateien im Ordner `self.basepath / self.controlvideos_folder` 
+        durchsucht. Berücksichtigt werden nur Dateien mit Endungen aus `allowed_filetypes`.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Ein DataFrame mit den Spalten:
+            - 'id'
+            - 'controlvideo_depth'
+            - 'controlvideo_normal'
+            - 'controlvideo_combined'
+            - 'n_frames'
+            - 'width'
+            - 'height'
+
+        Guaranteed
+        ----------
+            - Jede ID kommt höchstens einmal vor.
+            - Falls mehrere Controlvideos desselben Typs für eine ID vorhanden sind, 
+              wird nur das zuerst gefundene Video verwendet.
+
+        Not Guaranteed
+        --------------
+            - Alle Spalten existieren in jedem Fall.
+            - Für jede ID existiert zwingend ein Eintrag.
+        """
+        
         
         control_path = self.basepath / self.controlvideos_folder
 
@@ -682,8 +711,16 @@ class MasterTable:
 
         # Hilfsfunktion für parallele Verarbeitung
         def process_file(file):
-
+            
+            allowed_filetypes = [".mov", ".mp4"] # Hier können weitere Types festgelegt werden
+            
+            file = Path(file)
             filestem = file.stem
+            filetype = file.suffix.lower()
+            
+            if filetype not in allowed_filetypes:
+                return None
+            
 
             self.log("from 'get_controlvideos_table()' -> 'calling generate_id()'...",
                      "log_controlvideo_generation", "log_utils")
@@ -758,17 +795,27 @@ class MasterTable:
 
 
         self.log(f"\n"
-                 f"generated Dataframe:\n"
+                 f"generated Controlvideos-Dataframe:\n"
                  f"{controlvideos_df}",
                  "log_controlvideo_generation")
 
         return controlvideos_df
 
-    ############################################################
-    # Generiert einen DataFrame für die Prompts
-    ############################################################
-
     def get_prompts_table(self) -> pd.DataFrame:
+            """
+            Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
+            
+            Hierbei werdn sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
+            liegen durchforstet. Verwendet werden die Spalten 'id' und 'prompt' innerhalb der .csv-Dateien.
+            Werden keine Prompts gefunden, wird ein leerer Dataframe zurückgegeben, der zwei leere Spalten 'id' und 'prompt' enthält
+            
+            Returns
+            -------
+            pandas.DataFrame
+                Ein Pandas-Dataframe, bestehend aus den Spalten 'id' und 'prompts'.
+                Wird von der Methode garantiert.
+            """
+            
         prompt_path = self.basepath / self.prompts_folder
         self.log_current = "log_prompt_generation"
 

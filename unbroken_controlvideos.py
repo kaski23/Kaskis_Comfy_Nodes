@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from datetime import datetime
 
 from comfy.comfy_types import ComfyNodeABC, IO
 from comfy_api.input_impl import VideoFromFile
@@ -74,7 +75,7 @@ class CollectVideoNode(ComfyNodeABC):
         video_dict = VideoFromFile(file_path)
         
         if enableDebugMsg:
-            print(f"Unbroken Video Handler: Using filepath: {file_path} with file-ID {file_id}")
-            print(f"")
+            print(f"Unbroken Video Handler: Using Entry {index} of {len(collector.files)}, getting filepath {file_path} and file-ID {file_id}")
+            print(f"Unbroken Video Handler: Starting generation at {datetime.now()}")
         
         return file_id, video_dict
