@@ -802,19 +802,19 @@ class MasterTable:
         return controlvideos_df
 
     def get_prompts_table(self) -> pd.DataFrame:
-            """
-            Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
-            
-            Hierbei werdn sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
-            liegen durchforstet. Verwendet werden die Spalten 'id' und 'prompt' innerhalb der .csv-Dateien.
-            Werden keine Prompts gefunden, wird ein leerer Dataframe zurückgegeben, der zwei leere Spalten 'id' und 'prompt' enthält
-            
-            Returns
-            -------
-            pandas.DataFrame
-                Ein Pandas-Dataframe, bestehend aus den Spalten 'id' und 'prompts'.
-                Wird von der Methode garantiert.
-            """
+        """
+        Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
+        
+        Hierbei werdn sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
+        liegen durchforstet. Verwendet werden die Spalten 'id' und 'prompt' innerhalb der .csv-Dateien.
+        Werden keine Prompts gefunden, wird ein leerer Dataframe zurückgegeben, der zwei leere Spalten 'id' und 'prompt' enthält
+        
+        Returns
+        -------
+        pandas.DataFrame
+            Ein Pandas-Dataframe, bestehend aus den Spalten 'id' und 'prompts'.
+            Wird von der Methode garantiert.
+        """
             
         prompt_path = self.basepath / self.prompts_folder
         self.log_current = "log_prompt_generation"
