@@ -1033,7 +1033,9 @@ class MasterTable:
                         df = df.drop("prompt_neg2", axis=1)
                         
                     self.log(f"Adding prompts from {file}", "log_prompt_generation")
-
+                    
+                    if all_prompts is None:
+                        all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
 
                     # prompt_new und prompt_neg_new zusammenführen
                     if "prompt_new" in all_prompts.columns:
