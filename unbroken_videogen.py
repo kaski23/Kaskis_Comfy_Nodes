@@ -44,8 +44,8 @@ class VideoHandler(ComfyNodeABC):
             }
         }
     
-    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt", "width", "height", "n_frames")
+    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative" "width", "height", "n_frames")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -83,6 +83,7 @@ class VideoHandler(ComfyNodeABC):
         video_id        = df.iloc[index]["id"]
         controlvideo    = load_video_as_comfy_tensor(df.iloc[index]["controlvideo"])
         prompt          = df.iloc[index]["prompt"]
+        prompt_neg = df.iloc[index]["prompt_neg"]
         width           = df.iloc[index]["width_pad"]
         height          = df.iloc[index]["height_pad"]
         n_frames        = df.iloc[index]["n_frames"]
@@ -109,7 +110,7 @@ class VideoHandler(ComfyNodeABC):
         
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
-        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), int(width), int(height), int(n_frames_optim)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width), int(height), int(n_frames_optim)
         
 
 
@@ -539,9 +540,35 @@ class MasterTable:
     # Checkt den Master-df auf Fehler
     # Erwartet wird ein df mit id, styleframe, 
     # controlvideo_depth, controlvideo_normal, controlvideo_combined, n_frames, width, height
-    # prompt
+    # prompt, prompt_negative
     ############################################################
     def consolidate(self):
+        """
+        Checkt den Master-df auf Fehler
+        
+        Guarantees
+        ------------
+        Ein Dataframe mit den Spalten:
+            - id
+            - styleframe
+            - controlvideo_depth
+            - controlvideo_normal
+            - controlvideo_combined
+            - n_frames
+            - width
+            - height
+            - prompt
+            - prompt_negative
+            
+        Sowie validen Einträgen in:
+            - id
+            - styleframe
+            - n_frames
+            - width
+            - height
+            - controlvideo_depth || controlvideo_normal || controlvideo_combined
+        """
+        
         # Checkt, ob überhaupt etwas im DF steht
         if self.master_df.empty:
             raise ValueError(self.print_error(
@@ -572,7 +599,7 @@ class MasterTable:
                     
                     
         # Nachträglich nichtkritische Spalten ergänzen, sollte eine Spalte nicht vorhanden sein keine Einträge stehen
-        for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "prompt"]:
+        for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "prompt", "prompt_neg"]:
             if col not in self.master_df.columns:
                 self.master_df[col] = pd.NA
                 
@@ -609,6 +636,7 @@ class MasterTable:
         
         # Aufräumen
         self.master_df["prompt"]                    = self.master_df["prompt"].fillna("")
+        self.master_df["prompt_neg"]                    = self.master_df["prompt_neg"].fillna("")
         self.master_df["controlvideo_combined"]     = self.master_df["controlvideo_combined"].fillna("")
         self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
         self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
@@ -805,15 +833,30 @@ class MasterTable:
         """
         Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
         
-        Hierbei werdn sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
-        liegen durchforstet. Verwendet werden die Spalten 'id' und 'prompt' innerhalb der .csv-Dateien.
-        Werden keine Prompts gefunden, wird ein leerer Dataframe zurückgegeben, der zwei leere Spalten 'id' und 'prompt' enthält
+        Hierbei werden sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
+        liegen durchforstet. Verwendet werden die Spalten:
+        - id
+        - prompt
+        - prompt1
+        - prompt2
+        - prompt_neg
+        - prompt_neg1
+        - prompt_neg2
+        Nur Einträge mit gültiger ID werden verwendet. Einträge mit derselben ID in mehreren csv-Dateien werden gemerged.
         
         Returns
         -------
         pandas.DataFrame
-            Ein Pandas-Dataframe, bestehend aus den Spalten 'id' und 'prompts'.
-            Wird von der Methode garantiert.
+            
+        Guarantees
+        -------
+        Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg'.
+        Kann leer sein, wenn keine Inhalte gefunden wurden.
+        
+        No Guarantee
+        -------
+        Sollten zwei csv-Dateien dieselbe ID enthalten, wird nur der zugehörige Prompt aus der zuerst eingelesenen
+        Datei verwendet
         """
             
         prompt_path = self.basepath / self.prompts_folder
@@ -825,42 +868,77 @@ class MasterTable:
             "log_prompt_generation"
         )
 
-        all_prompts = []
+
+        required_columns = {"id", "prompt", "prompt_neg"}
+        usable_columns = {"id", "prompt", "prompt1", "prompt2", "prompt_neg", "prompt_neg1", "prompt_neg2"}
+        
+        all_prompts = pd.DataFrame(columns=list(required_columns))
 
         for file in prompt_path.iterdir():
             if file.is_file() and file.suffix.lower() == ".csv":
                 try:
-                    df = pd.read_csv(file)
+                    df = pd.read_csv(file, sep=",", encoding="utf-8")
+                    
+                    # Alles, was nicht usable_columns ist rausschmeißen
+                    df = df[df.columns.intersection(usable_columns)]
 
-                    # Prüfen, ob die nötigen Spalten existieren
-                    if not {"id", "prompt"}.issubset(df.columns):
-                        self.log(
-                            f"Warnung von 'get_prompts_table()': CSV {file} enthält nicht beide Spalten 'id' und 'prompt'. "
-                            f"Gefundene Spalten: {list(df.columns)}",
-                            "warnings"
-                        )
-                        continue
+                    # Prüfen, ob die nötigen Spalten existieren, im Zweifel leer ergänzen
+                    missing = required_columns - set(df.columns)
+                    for col in missing:
+                        df[col] = ""
+                        
+                    # Zeilen ohne IDs rausschmeißen
+                    df = df[df["id"].notna() & (df["id"] != "")]
 
+                    # Nans ersetzen
+                    df = df.fillna("")
+                    
+                    # Promptspalten kombinieren, überflüssige Kommas entfernen
+                    if "prompt1" in df.columns:
+                        df["prompt"] = df[["prompt", "prompt1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                        df = df.drop("prompt1", axis=1)
+                    
+                    if "prompt2" in df.columns:
+                        df["prompt"] = df[["prompt", "prompt2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                        df = df.drop("prompt2", axis=1)
+                        
+                    if "prompt_neg1" in df.columns:
+                        df["prompt_neg"] = df[["prompt_neg", "prompt_neg1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                        df = df.drop("prompt_neg1", axis=1)
+                        
+                    if "prompt_neg2" in df.columns:
+                        df["prompt_neg"] = df[["prompt_neg", "prompt_neg2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                        df = df.drop("prompt_neg2", axis=1)
+                        
                     self.log(f"Adding prompts from {file}", "log_prompt_generation")
 
-                    all_prompts.append(df[["id", "prompt"]])
+
+                    # Mergen, prompts mit Komma zusammenführen
+                    all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
+
+                    if "prompt_new" in all_prompts.columns:
+                        all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].agg(
+                            lambda x: ",".join([v for v in x if v]), axis=1
+                        )
+                        all_prompts = all_prompts.drop(columns=["prompt_new"])
+
+                    if "prompt_neg_new" in all_prompts.columns:
+                        all_prompts["prompt_neg"] = all_prompts[["prompt_neg", "prompt_neg_new"]].agg(
+                            lambda x: ",".join([v for v in x if v]), axis=1
+                        )
+                        all_prompts = all_prompts.drop(columns=["prompt_neg_new"])
+                    
 
                 except Exception as e:
                     self.log(f"Fehler beim Einlesen von {file}: {e}", "warnings")
 
-        # Falls keine gültigen CSVs gefunden wurden → leeres DF zurückgeben
-        if not all_prompts:
-            return pd.DataFrame(columns=["id", "prompt"])
-
-        # Alle zusammenführen
-        prompts_df = pd.concat(all_prompts, ignore_index=True)
 
         self.log(f"\n"
                  f"generated Dataframe:\n"
-                 f"{prompts_df}"
+                 f"{all_prompts}"
                  , "log_prompt_generation")
 
-        return prompts_df
+        return all_prompts
 
     #################################################################################
     ###                           CLASS UTILITIES                                 ###
