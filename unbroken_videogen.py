@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
 import numpy as np
 import torch
+import torch.nn.functional as F
 from datetime import datetime
 
 import folder_paths
@@ -45,7 +46,7 @@ class VideoHandler(ComfyNodeABC):
         }
     
     RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative" "width", "height", "n_frames")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -83,34 +84,38 @@ class VideoHandler(ComfyNodeABC):
         video_id        = df.iloc[index]["id"]
         controlvideo    = load_video_as_comfy_tensor(df.iloc[index]["controlvideo"])
         prompt          = df.iloc[index]["prompt"]
-        prompt_neg = df.iloc[index]["prompt_neg"]
-        width           = df.iloc[index]["width_pad"]
-        height          = df.iloc[index]["height_pad"]
+        prompt_neg      = df.iloc[index]["prompt_neg"]
+        width           = df.iloc[index]["width"]
+        height          = df.iloc[index]["height"]
+        width_optim     = df.iloc[index]["width_pad"]
+        height_optim    = df.iloc[index]["height_pad"]
         n_frames        = df.iloc[index]["n_frames"]
         n_frames_optim  = df.iloc[index]["n_frames_optim"]
         
-        styleframes = get_styleframes(
-                                df.iloc[index]["styleframe"], 
-                                df.iloc[index]["width"], 
-                                df.iloc[index]["height"],
-        )
-        
-        stylevideo, mask, largest_index = generate_stylevideo(
-                                df.iloc[index]["styleframe"], 
-                                df.iloc[index]["width"], 
-                                df.iloc[index]["height"], 
-                                n_frames
-        )
+        styleframes = get_styleframes(df.iloc[index]["styleframe"], width, height)
+        stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height, n_frames)
         
         # Kürzen der Videotensoren auf die optimale Frame-Anzahl
-        controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_index >= n_frames_optim)
-        stylevideo   = shorten_tensor(stylevideo, n_frames_optim, largest_index >= n_frames_optim)
-        mask         = shorten_tensor(mask, n_frames_optim, largest_index >= n_frames_optim)
+        controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_styleframe_index >= n_frames_optim)
+        stylevideo   = shorten_tensor(stylevideo,   n_frames_optim, largest_styleframe_index >= n_frames_optim)
+        mask         = shorten_tensor(mask,         n_frames_optim, largest_styleframe_index >= n_frames_optim)
+        
+        
+        # Sicherstellen von Aspect-Ratio
+        aspect_ratio = width/height
+        controlvideo = resize_to_aspect(controlvideo, aspect_ratio)
+        stylevideo   = resize_to_aspect(stylevideo,   aspect_ratio)
+        mask         = resize_to_aspect(mask,         aspect_ratio)
+        
+        # Padding in die optimale Auflösung
+        controlvideo = resize_and_pad(controlvideo, width_optim, height_optim)
+        stylevideo   = resize_and_pad(stylevideo,   width_optim, height_optim)
+        mask         = resize_and_pad(mask,         width_optim, height_optim)
         
         
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
-        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width), int(height), int(n_frames_optim)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim)
         
 
 
@@ -276,7 +281,87 @@ def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: boo
     else:
         return t[:desired_length]    # behält die ersten
 
-    
+
+def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
+    """
+    Skaliert einen Tensor [F, W, H, C] proportional auf die größtmögliche Größe,
+    die in target_width × target_height passt, und paddet anschließend mit Bildmittelwert.
+
+    Am Ende hat der Tensor exakt [F, target_width, target_height, C].
+    """
+    if images.ndim != 4:
+        raise ValueError(f"Expected [F, W, H, C], got {images.shape}")
+
+    F_, W, H, C = images.shape
+    images = images.permute(0, 3, 2, 1)  # -> [F, C, H, W]
+
+    # --- Schritt 1: Skalierung proportional auf max. Größe ---
+    scale_w = target_width / W
+    scale_h = target_height / H
+    scale = min(scale_w, scale_h)
+
+    new_W = max(1, int(round(W * scale)))
+    new_H = max(1, int(round(H * scale)))
+
+    if (new_H, new_W) != (H, W):
+        images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
+
+    # --- Schritt 2: Mittelwertfarbe bestimmen ---
+    mean_color = images.mean(dim=(0, 2, 3), keepdim=True)  # [1, C, 1, 1]
+
+    # --- Schritt 3: Ausgabetensor direkt mit mean_color füllen ---
+    out = mean_color.expand(F_, C, target_height, target_width).clone()
+
+    # --- Schritt 4: Bild mittig einsetzen ---
+    pad_left   = (target_width  - new_W) // 2
+    pad_top    = (target_height - new_H) // 2
+    out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
+
+    # Speicher freigeben
+    del images
+
+    return out.permute(0, 3, 2, 1)  # zurück [F, W, H, C]
+
+
+def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
+    """
+    Streckt einen Tensor [F, W, H, C] so, dass er das gewünschte Seitenverhältnis hat.
+
+    Parameters
+    ----------
+    images : torch.Tensor
+        Eingabetensor [F, W, H, C].
+    aspect_ratio : float
+        Zielseitenverhältnis (Breite / Höhe).
+
+    Returns
+    -------
+    torch.Tensor
+        [F, new_W, new_H, C] mit angepasstem Seitenverhältnis.
+    """
+    if images.ndim != 4:
+        raise ValueError(f"Expected [F, W, H, C], got {images.shape}")
+
+    F_, W, H, C = images.shape
+    current_ratio = W / H
+
+    # Neue Größe berechnen
+    if abs(current_ratio - aspect_ratio) < 1e-6:
+        return images  # passt schon
+    elif current_ratio < aspect_ratio:
+        new_W, new_H = int(round(H * aspect_ratio)), H
+    else:
+        new_W, new_H = W, int(round(W / aspect_ratio))
+
+    # [F, W, H, C] -> [F, C, H, W]
+    images = images.permute(0, 3, 2, 1)
+
+    # Interpolieren
+    images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
+
+    return images.permute(0, 3, 2, 1)  # zurück
+ 
+ 
  
 class Provider:
     def __init__(
@@ -298,7 +383,7 @@ class Provider:
         ### Object Variables ###
         self.possible_resolutions = [(512, 512), (848, 480), (480, 848), (1024, 1024), (1280, 720), (720, 1280)]
 
-        self.mt = MasterTable(
+        self.gen_df = MasterTable(
                         basepath, 
                         controlvideos_folder, 
                         styleframes_folder, 
@@ -309,7 +394,7 @@ class Provider:
                         debug_flags
         ).master_df
 
-        self.gen_df = self.generate_generation_dataframe(self.mt, use_prompts_and_noprompts)
+        self.gen_df = self.generate_generation_dataframe(self.gen_df, use_prompts_and_noprompts)
 
 
 
