@@ -93,7 +93,7 @@ class VideoHandler(ComfyNodeABC):
         n_frames_optim  = df.iloc[index]["n_frames_optim"]
         
         styleframes = get_styleframes(df.iloc[index]["styleframe"], width, height)
-        stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height, n_frames)
+        stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height , width_optim, height_optim, n_frames)
         
         # Kürzen der Videotensoren auf die optimale Frame-Anzahl
         controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_styleframe_index >= n_frames_optim)
@@ -118,7 +118,7 @@ def get_styleframes(styleframe_tupel, width: int, height: int) -> torch.Tensor:
     return torch.cat(tensors, dim=0)
 
 
-def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int, width_optim: int, height_optim: int):
+def generate_stylevideo(styleframe_tupel, width: int, height: int, width_optim: int, height_optim: int, n_frames: int):
     
     video, mask = generate_wan_nullInput(width_optim, height_optim, n_frames)
     indices = []
