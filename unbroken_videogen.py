@@ -1032,11 +1032,33 @@ class MasterTable:
                         df["prompt_neg"] = df[["prompt_neg", "prompt_neg2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
                         df = df.drop("prompt_neg2", axis=1)
                         
-                    self.log(f"Adding prompts from {file}", "log_prompt_generation")
+                    self.log(f"Adding prompts from {file}, got this after reformatting: \n"
+                             f"{df}", "log_prompt_generation")
                     
-                    if all_prompts is None:
-                        all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
+                    
+                    # Doppelte IDs innerhalb von df zusammenführen
+                    if not df.empty:
+                        df = (
+                            df.groupby("id", as_index=False)
+                            .agg({
+                                "prompt": lambda x: ",".join([v for v in x if v]),
+                                "prompt_neg": lambda x: ",".join([v for v in x if v])
+                            })
+                        )
 
+                        # Überflüssige doppelte Kommata entfernen
+                        df["prompt"] = df["prompt"].str.strip(",").str.replace(r",+", ",", regex=True)
+                        df["prompt_neg"] = df["prompt_neg"].str.strip(",").str.replace(r",+", ",", regex=True)
+                    
+                    
+                    
+                    #Merging/Initializing of df
+                    if all_prompts is None:
+                        all_prompts = df
+                        
+                    else:    
+                        all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
+                    
                     # prompt_new und prompt_neg_new zusammenführen
                     if "prompt_new" in all_prompts.columns:
                         all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
