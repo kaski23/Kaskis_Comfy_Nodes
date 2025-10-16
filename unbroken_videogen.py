@@ -101,18 +101,6 @@ class VideoHandler(ComfyNodeABC):
         mask         = shorten_tensor(mask,         n_frames_optim, largest_styleframe_index >= n_frames_optim)
         
         
-        # Sicherstellen von Aspect-Ratio
-        aspect_ratio = width/height
-        controlvideo = resize_to_aspect(controlvideo, aspect_ratio)
-        stylevideo   = resize_to_aspect(stylevideo,   aspect_ratio)
-        mask         = resize_to_aspect(mask,         aspect_ratio)
-        
-        # Padding in die optimale Auflösung
-        controlvideo = resize_and_pad(controlvideo, width_optim, height_optim)
-        stylevideo   = resize_and_pad(stylevideo,   width_optim, height_optim)
-        mask         = resize_and_pad(mask,         width_optim, height_optim)
-        
-        
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
         return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim)
@@ -125,13 +113,14 @@ def get_styleframes(styleframe_tupel, width: int, height: int) -> torch.Tensor:
         # load_image_as_comfy_tensor gibt [1, H, W, 3] zurück
         tensor = load_image_as_comfy_tensor(path, width, height)  
         tensors.append(tensor)  
-
+    
     # Liste von [1, H, W, 3] → [N, H, W, 3]
     return torch.cat(tensors, dim=0)
 
 
-def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int):
-    video, mask = generate_wan_nullInput(width, height, n_frames)
+def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int, width_optim: int, height_optim: int):
+    
+    video, mask = generate_wan_nullInput(width_optim, height_optim, n_frames)
     indices = []
 
     for frame_no, path in styleframe_tupel:
@@ -142,10 +131,16 @@ def generate_stylevideo(styleframe_tupel, width: int, height: int, n_frames: int
             target_index = n_frames - 1
         else:
             target_index = frame_no
-
-        # Styleframe einsetzen
-        video[target_index] = load_image_as_comfy_tensor(path, width, height)[0]
-        mask[target_index]  = torch.full((1, height, width), 1.0)[0]
+        
+        #Styleframe einsetzen, resizen und padden
+        aspect_ratio = width/height
+        
+        image = load_image_as_comfy_tensor(path, width, height)
+        image = resize_to_aspect(image, aspect_ratio)
+        image = resize_and_pad(image, width_optim, height_optim)
+        
+        video[target_index] = image[0]
+        mask[target_index]  = torch.full((1, height_optim, width_optim), 1.0)[0]
         indices.append(target_index)
     
     largest_index = max(indices)
@@ -299,10 +294,10 @@ def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) 
     """
     if images.ndim == 4:
         # -------------------------
-        # IMAGE CASE [F, W, H, C]
+        # IMAGE CASE [F, H, W, C]
         # -------------------------
-        F_, W, H, C = images.shape
-        images = images.permute(0, 3, 2, 1)  # -> [F, C, H, W]
+        F_, H, W, C = images.shape
+        images = images.permute(0, 3, 1, 2)  # -> [F, C, H, W]
 
         # Skalierung
         scale_w = target_width / W
@@ -326,48 +321,19 @@ def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) 
         out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
 
         del images
-        return out.permute(0, 3, 2, 1)  # -> [F, W, H, C]
-
-    elif images.ndim == 3:
-        # -------------------------
-        # MASK CASE [F, H, W]
-        # -------------------------
-        F_, H, W = images.shape
-        images = images.unsqueeze(1)  # -> [F, 1, H, W]
-
-        # Skalierung
-        scale_w = target_width / W
-        scale_h = target_height / H
-        scale = min(scale_w, scale_h)
-        new_W = max(1, int(round(W * scale)))
-        new_H = max(1, int(round(H * scale)))
-
-        if (new_H, new_W) != (H, W):
-            images = F.interpolate(images.float(), size=(new_H, new_W), mode="nearest")
-
-        # Zieltensor mit 0 (Hintergrund) anlegen
-        out = torch.zeros((F_, 1, target_height, target_width), dtype=images.dtype, device=images.device)
-
-        # Maske mittig einsetzen
-        pad_left = (target_width  - new_W) // 2
-        pad_top  = (target_height - new_H) // 2
-        out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
-
-        del images
-        return out.squeeze(1)  # -> [F, target_height, target_width]
+        return out.permute(0, 2, 3, 1)  # -> [F, H, W, C]
 
     else:
         raise ValueError(f"Expected [F, W, H, C] or [F, H, W], got {images.shape}")
-
 
 
 def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
     """
     Streckt Bilder oder Masken auf gewünschte Aspect Ratio.
-    Unterstützt [F, W, H, C] (Images) und [F, H, W] (Masken).
+    Unterstützt [F, H, W, C] (Images) und [F, H, W] (Masken).
     """
-    if images.ndim == 4:  # [F, W, H, C]
-        F_, W, H, C = images.shape
+    if images.ndim == 4:  # [F, H, W, C]
+        F_, H, W, C = images.shape
         current_ratio = W / H
         if abs(current_ratio - aspect_ratio) < 1e-6:
             return images
@@ -376,26 +342,12 @@ def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
         else:
             new_W, new_H = W, int(round(W / aspect_ratio))
 
-        images = images.permute(0, 3, 2, 1)  # [F, C, H, W]
+        images = images.permute(0, 3, 1, 2)  # [F, C, H, W]
         images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
-        return images.permute(0, 3, 2, 1)    # zurück [F, W, H, C]
-
-    elif images.ndim == 3:  # [F, H, W] Maske
-        F_, H, W = images.shape
-        current_ratio = W / H
-        if abs(current_ratio - aspect_ratio) < 1e-6:
-            return images
-        elif current_ratio < aspect_ratio:
-            new_W, new_H = int(round(H * aspect_ratio)), H
-        else:
-            new_W, new_H = W, int(round(W / aspect_ratio))
-
-        images = images.unsqueeze(1)  # [F, 1, H, W]
-        images = F.interpolate(images.float(), size=(new_H, new_W), mode="nearest")
-        return images.squeeze(1)      # zurück [F, H, W]
+        return images.permute(0, 2, 3, 1)    # zurück [F, H, W, C]
 
     else:
-        raise ValueError(f"Expected [F, W, H, C] or [F, H, W], got {images.shape}")
+        raise ValueError(f"Expected [F, H, W, C] or [F, H, W], got {images.shape}")
 
  
  
