@@ -1035,17 +1035,15 @@ class MasterTable:
                     self.log(f"Adding prompts from {file}", "log_prompt_generation")
 
 
-                    # Mergen, prompts mit Komma zusammenführen
-                    all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
-
+                    # prompt_new und prompt_neg_new zusammenführen
                     if "prompt_new" in all_prompts.columns:
-                        all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].agg(
+                        all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
                             lambda x: ",".join([v for v in x if v]), axis=1
                         )
                         all_prompts = all_prompts.drop(columns=["prompt_new"])
 
                     if "prompt_neg_new" in all_prompts.columns:
-                        all_prompts["prompt_neg"] = all_prompts[["prompt_neg", "prompt_neg_new"]].agg(
+                        all_prompts["prompt_neg"] = all_prompts[["prompt_neg", "prompt_neg_new"]].fillna("").agg(
                             lambda x: ",".join([v for v in x if v]), axis=1
                         )
                         all_prompts = all_prompts.drop(columns=["prompt_neg_new"])
