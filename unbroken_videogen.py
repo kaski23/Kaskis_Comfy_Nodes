@@ -100,6 +100,9 @@ class VideoHandler(ComfyNodeABC):
         stylevideo   = shorten_tensor(stylevideo,   n_frames_optim, largest_styleframe_index >= n_frames_optim)
         mask         = shorten_tensor(mask,         n_frames_optim, largest_styleframe_index >= n_frames_optim)
         
+        # Resizing des Controlvideos auf optimale Auflösung
+        controlvideo = resize_and_pad(controlvideo, width_optim, height_optim)
+        
         
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
