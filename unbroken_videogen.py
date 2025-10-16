@@ -284,82 +284,119 @@ def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: boo
 
 def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
     """
-    Skaliert einen Tensor [F, W, H, C] proportional auf die größtmögliche Größe,
-    die in target_width × target_height passt, und paddet anschließend mit Bildmittelwert.
-
-    Am Ende hat der Tensor exakt [F, target_width, target_height, C].
-    """
-    if images.ndim != 4:
-        raise ValueError(f"Expected [F, W, H, C], got {images.shape}")
-
-    F_, W, H, C = images.shape
-    images = images.permute(0, 3, 2, 1)  # -> [F, C, H, W]
-
-    # --- Schritt 1: Skalierung proportional auf max. Größe ---
-    scale_w = target_width / W
-    scale_h = target_height / H
-    scale = min(scale_w, scale_h)
-
-    new_W = max(1, int(round(W * scale)))
-    new_H = max(1, int(round(H * scale)))
-
-    if (new_H, new_W) != (H, W):
-        images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
-
-    # --- Schritt 2: Mittelwertfarbe bestimmen ---
-    mean_color = images.mean(dim=(0, 2, 3), keepdim=True)  # [1, C, 1, 1]
-
-    # --- Schritt 3: Ausgabetensor direkt mit mean_color füllen ---
-    out = mean_color.expand(F_, C, target_height, target_width).clone()
-
-    # --- Schritt 4: Bild mittig einsetzen ---
-    pad_left   = (target_width  - new_W) // 2
-    pad_top    = (target_height - new_H) // 2
-    out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
-
-    # Speicher freigeben
-    del images
-
-    return out.permute(0, 3, 2, 1)  # zurück [F, W, H, C]
-
-
-def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
-    """
-    Streckt einen Tensor [F, W, H, C] so, dass er das gewünschte Seitenverhältnis hat.
-
-    Parameters
-    ----------
-    images : torch.Tensor
-        Eingabetensor [F, W, H, C].
-    aspect_ratio : float
-        Zielseitenverhältnis (Breite / Höhe).
+    Skaliert einen Tensor proportional auf die größtmögliche Größe,
+    die in target_width × target_height passt, und paddet anschließend.
+    
+    Unterstützt:
+        - Images: [F, W, H, C], bilinear, Pad = Mittelwertfarbe
+        - Masken: [F, H, W], nearest, Pad = 0.0
 
     Returns
     -------
     torch.Tensor
-        [F, new_W, new_H, C] mit angepasstem Seitenverhältnis.
+        - Images: [F, target_width, target_height, C]
+        - Masken: [F, target_height, target_width]
     """
-    if images.ndim != 4:
-        raise ValueError(f"Expected [F, W, H, C], got {images.shape}")
+    if images.ndim == 4:
+        # -------------------------
+        # IMAGE CASE [F, W, H, C]
+        # -------------------------
+        F_, W, H, C = images.shape
+        images = images.permute(0, 3, 2, 1)  # -> [F, C, H, W]
 
-    F_, W, H, C = images.shape
-    current_ratio = W / H
+        # Skalierung
+        scale_w = target_width / W
+        scale_h = target_height / H
+        scale = min(scale_w, scale_h)
+        new_W = max(1, int(round(W * scale)))
+        new_H = max(1, int(round(H * scale)))
 
-    # Neue Größe berechnen
-    if abs(current_ratio - aspect_ratio) < 1e-6:
-        return images  # passt schon
-    elif current_ratio < aspect_ratio:
-        new_W, new_H = int(round(H * aspect_ratio)), H
+        if (new_H, new_W) != (H, W):
+            images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
+
+        # Mittelwertfarbe bestimmen
+        mean_color = images.mean(dim=(0, 2, 3), keepdim=True)  # [1, C, 1, 1]
+
+        # Zieltensor anlegen mit Mittelwertfarbe
+        out = mean_color.expand(F_, C, target_height, target_width).clone()
+
+        # Bild mittig einsetzen
+        pad_left = (target_width  - new_W) // 2
+        pad_top  = (target_height - new_H) // 2
+        out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
+
+        del images
+        return out.permute(0, 3, 2, 1)  # -> [F, W, H, C]
+
+    elif images.ndim == 3:
+        # -------------------------
+        # MASK CASE [F, H, W]
+        # -------------------------
+        F_, H, W = images.shape
+        images = images.unsqueeze(1)  # -> [F, 1, H, W]
+
+        # Skalierung
+        scale_w = target_width / W
+        scale_h = target_height / H
+        scale = min(scale_w, scale_h)
+        new_W = max(1, int(round(W * scale)))
+        new_H = max(1, int(round(H * scale)))
+
+        if (new_H, new_W) != (H, W):
+            images = F.interpolate(images.float(), size=(new_H, new_W), mode="nearest")
+
+        # Zieltensor mit 0 (Hintergrund) anlegen
+        out = torch.zeros((F_, 1, target_height, target_width), dtype=images.dtype, device=images.device)
+
+        # Maske mittig einsetzen
+        pad_left = (target_width  - new_W) // 2
+        pad_top  = (target_height - new_H) // 2
+        out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
+
+        del images
+        return out.squeeze(1)  # -> [F, target_height, target_width]
+
     else:
-        new_W, new_H = W, int(round(W / aspect_ratio))
+        raise ValueError(f"Expected [F, W, H, C] or [F, H, W], got {images.shape}")
 
-    # [F, W, H, C] -> [F, C, H, W]
-    images = images.permute(0, 3, 2, 1)
 
-    # Interpolieren
-    images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
 
-    return images.permute(0, 3, 2, 1)  # zurück
+def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
+    """
+    Streckt Bilder oder Masken auf gewünschte Aspect Ratio.
+    Unterstützt [F, W, H, C] (Images) und [F, H, W] (Masken).
+    """
+    if images.ndim == 4:  # [F, W, H, C]
+        F_, W, H, C = images.shape
+        current_ratio = W / H
+        if abs(current_ratio - aspect_ratio) < 1e-6:
+            return images
+        elif current_ratio < aspect_ratio:
+            new_W, new_H = int(round(H * aspect_ratio)), H
+        else:
+            new_W, new_H = W, int(round(W / aspect_ratio))
+
+        images = images.permute(0, 3, 2, 1)  # [F, C, H, W]
+        images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
+        return images.permute(0, 3, 2, 1)    # zurück [F, W, H, C]
+
+    elif images.ndim == 3:  # [F, H, W] Maske
+        F_, H, W = images.shape
+        current_ratio = W / H
+        if abs(current_ratio - aspect_ratio) < 1e-6:
+            return images
+        elif current_ratio < aspect_ratio:
+            new_W, new_H = int(round(H * aspect_ratio)), H
+        else:
+            new_W, new_H = W, int(round(W / aspect_ratio))
+
+        images = images.unsqueeze(1)  # [F, 1, H, W]
+        images = F.interpolate(images.float(), size=(new_H, new_W), mode="nearest")
+        return images.squeeze(1)      # zurück [F, H, W]
+
+    else:
+        raise ValueError(f"Expected [F, W, H, C] or [F, H, W], got {images.shape}")
+
  
  
  
