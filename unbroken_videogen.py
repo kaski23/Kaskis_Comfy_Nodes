@@ -918,7 +918,7 @@ class MasterTable:
         """
         Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
         
-        Hierbei werden sämtliche .csv-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
+        Hierbei werden sämtliche .csv, .xlsx, .xlsm, .xls, .xlsb-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
         liegen durchforstet. Verwendet werden die Spalten:
         - id
         - prompt
@@ -937,11 +937,6 @@ class MasterTable:
         -------
         Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg'.
         Kann leer sein, wenn keine Inhalte gefunden wurden.
-        
-        No Guarantee
-        -------
-        Sollten zwei csv-Dateien dieselbe ID enthalten, wird nur der zugehörige Prompt aus der zuerst eingelesenen
-        Datei verwendet
         """
             
         prompt_path = self.basepath / self.prompts_folder
@@ -960,84 +955,103 @@ class MasterTable:
         all_prompts = pd.DataFrame(columns=list(required_columns))
 
         for file in prompt_path.iterdir():
-            if file.is_file() and file.suffix.lower() == ".csv":
+            if not file.is_file():
+                continue
+            
+            df = None
+            
+            if file.suffix.lower() == ".csv":
                 try:
                     df = pd.read_csv(file, sep=",", encoding="utf-8")
                     
-                    # Alles, was nicht usable_columns ist rausschmeißen
-                    df = df[df.columns.intersection(usable_columns)]
-
-                    # Prüfen, ob die nötigen Spalten existieren, im Zweifel leer ergänzen
-                    missing = required_columns - set(df.columns)
-                    for col in missing:
-                        df[col] = ""
-                        
-                    # Zeilen ohne IDs rausschmeißen
-                    df = df[df["id"].notna() & (df["id"] != "")]
-
-                    # Nans ersetzen
-                    df = df.fillna("")
-                    
-                    # Promptspalten kombinieren, überflüssige Kommas entfernen
-                    if "prompt1" in df.columns:
-                        df["prompt"] = df[["prompt", "prompt1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
-                        df = df.drop("prompt1", axis=1)
-                    
-                    if "prompt2" in df.columns:
-                        df["prompt"] = df[["prompt", "prompt2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
-                        df = df.drop("prompt2", axis=1)
-                        
-                    if "prompt_neg1" in df.columns:
-                        df["prompt_neg"] = df[["prompt_neg", "prompt_neg1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
-                        df = df.drop("prompt_neg1", axis=1)
-                        
-                    if "prompt_neg2" in df.columns:
-                        df["prompt_neg"] = df[["prompt_neg", "prompt_neg2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
-                        df = df.drop("prompt_neg2", axis=1)
-                        
-                    self.log(f"Adding prompts from {file}, got this after reformatting: \n"
-                             f"{df}", "log_prompt_generation")
-                    
-                    
-                    # Doppelte IDs innerhalb von df zusammenführen
-                    if not df.empty:
-                        df = (
-                            df.groupby("id", as_index=False)
-                            .agg({
-                                "prompt": lambda x: ",".join([v for v in x if v]),
-                                "prompt_neg": lambda x: ",".join([v for v in x if v])
-                            })
-                        )
-
-                        # Überflüssige doppelte Kommata entfernen
-                        df["prompt"] = df["prompt"].str.strip(",").str.replace(r",+", ",", regex=True)
-                        df["prompt_neg"] = df["prompt_neg"].str.strip(",").str.replace(r",+", ",", regex=True)
-                    
-                    
-                    
-                    #Merging/Initializing of df
-                    if all_prompts is None:
-                        all_prompts = df
-                        
-                    else:    
-                        all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
-                    
-                    # prompt_new und prompt_neg_new zusammenführen
-                    if "prompt_new" in all_prompts.columns:
-                        all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
-                            lambda x: ",".join([v for v in x if v]), axis=1
-                        )
-                        all_prompts = all_prompts.drop(columns=["prompt_new"])
-
-                    if "prompt_neg_new" in all_prompts.columns:
-                        all_prompts["prompt_neg"] = all_prompts[["prompt_neg", "prompt_neg_new"]].fillna("").agg(
-                            lambda x: ",".join([v for v in x if v]), axis=1
-                        )
-                        all_prompts = all_prompts.drop(columns=["prompt_neg_new"])
-                    
-
                 except Exception as e:
                     self.log(f"Fehler beim Einlesen von {file}: {e}", "warnings")
+                    continue
+                    
+            elif file.suffix.lower() in {".xlsx", ".xlsm", ".xls", ".xlsb"}:
+                try:
+                    df = pd.read_excel(file, sheet_name=0)
+                except Exception as e:
+                    self.log(f"Fehler beim Einlesen von {file}: {e}", "warnings")
+                    continue
+            
+            else:
+                continue
+                    
+            
+                    
+            # Alles, was nicht usable_columns ist rausschmeißen
+            df = df[df.columns.intersection(usable_columns)]
+
+            # Prüfen, ob die nötigen Spalten existieren, im Zweifel leer ergänzen
+            missing = required_columns - set(df.columns)
+            for col in missing:
+                df[col] = ""
+                
+            # Zeilen ohne IDs rausschmeißen
+            df = df[df["id"].notna() & (df["id"] != "")]
+
+            # Nans ersetzen
+            df = df.fillna("")
+            
+            # Promptspalten kombinieren, überflüssige Kommas entfernen
+            if "prompt1" in df.columns:
+                df["prompt"] = df[["prompt", "prompt1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                df = df.drop("prompt1", axis=1)
+            
+            if "prompt2" in df.columns:
+                df["prompt"] = df[["prompt", "prompt2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                df = df.drop("prompt2", axis=1)
+                
+            if "prompt_neg1" in df.columns:
+                df["prompt_neg"] = df[["prompt_neg", "prompt_neg1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                df = df.drop("prompt_neg1", axis=1)
+                
+            if "prompt_neg2" in df.columns:
+                df["prompt_neg"] = df[["prompt_neg", "prompt_neg2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
+                df = df.drop("prompt_neg2", axis=1)
+                
+            self.log(f"Adding prompts from {file}, got this after reformatting: \n"
+                     f"{df}", "log_prompt_generation")
+            
+            
+            # Doppelte IDs innerhalb von df zusammenführen
+            if not df.empty:
+                df = (
+                    df.groupby("id", as_index=False)
+                    .agg({
+                        "prompt": lambda x: ",".join([v for v in x if v]),
+                        "prompt_neg": lambda x: ",".join([v for v in x if v])
+                    })
+                )
+
+                # Überflüssige doppelte Kommata entfernen
+                df["prompt"] = df["prompt"].str.strip(",").str.replace(r",+", ",", regex=True)
+                df["prompt_neg"] = df["prompt_neg"].str.strip(",").str.replace(r",+", ",", regex=True)
+            
+            
+            
+            #Merging df mit all_prompts
+            if all_prompts.empty:
+                all_prompts = df
+            else:
+                all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
+            
+            # prompt_new und prompt_neg_new zusammenführen
+            if "prompt_new" in all_prompts.columns:
+                all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
+                    lambda x: ",".join([v for v in x if v]), axis=1
+                )
+                all_prompts = all_prompts.drop(columns=["prompt_new"])
+
+            if "prompt_neg_new" in all_prompts.columns:
+                all_prompts["prompt_neg"] = all_prompts[["prompt_neg", "prompt_neg_new"]].fillna("").agg(
+                    lambda x: ",".join([v for v in x if v]), axis=1
+                )
+                all_prompts = all_prompts.drop(columns=["prompt_neg_new"])
+                    
+
+
 
 
         self.log(f"\n"
