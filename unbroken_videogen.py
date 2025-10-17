@@ -420,6 +420,7 @@ class Provider:
 
         #Filter Table for unavailable Controlvideos
         df["controlvideo"] = df["controlvideo_combined"]
+        df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_lineart"]
         df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_depth"]
         df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_normal"]
 
@@ -631,6 +632,7 @@ class MasterTable:
             - controlvideo_depth
             - controlvideo_normal
             - controlvideo_combined
+            - controlvideo_lineart
             - n_frames
             - width
             - height
@@ -643,7 +645,7 @@ class MasterTable:
             - n_frames
             - width
             - height
-            - controlvideo_depth || controlvideo_normal || controlvideo_combined
+            - controlvideo_depth || controlvideo_normal || controlvideo_combined || controlvideo_lineart
         """
         
         # Checkt, ob überhaupt etwas im DF steht
@@ -661,10 +663,11 @@ class MasterTable:
                         ]
                         
         for col in required_columns:
-            if (col == "controlvideo_combined") or (col == "controlvideo_normal") or (col == "controlvideo_depth"):
+            if (col == "controlvideo_combined") or (col == "controlvideo_normal") or (col == "controlvideo_depth") or (col == "controlvideo_lineart"):
                 if (("controlvideo_combined"    not in self.master_df.columns) 
                 and ("controlvideo_depth"       not in self.master_df.columns)
-                and ("controlvideo_normal"      not in self.master_df.columns)):
+                and ("controlvideo_normal"      not in self.master_df.columns)
+                and ("controlvideo_lineart"      not in self.master_df.columns)):
                     raise ValueError(self.print_error(
                         "master_df enthält keine Controlvideos"
                     ))
@@ -675,8 +678,8 @@ class MasterTable:
                     ))
                     
                     
-        # Nachträglich nichtkritische Spalten ergänzen, sollte eine Spalte nicht vorhanden sein keine Einträge stehen
-        for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "prompt", "prompt_neg"]:
+        # Nachträglich nichtkritische Spalten ergänzen, sollte eine Spalte nicht vorhanden sein
+        for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart", "prompt", "prompt_neg"]:
             if col not in self.master_df.columns:
                 self.master_df[col] = pd.NA
                 
@@ -703,7 +706,7 @@ class MasterTable:
                     ))
 
         # Checkt, ob es mindestens ein Controlvideo pro Video gibt
-        cols = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth"]
+        cols = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"]
         if not (self.master_df[cols].notna().any(axis=1).all()):
             raise ValueError(self.print_error(
                     "master_df enthält keine Controlvideos an mindestens einer Stelle"
@@ -717,6 +720,7 @@ class MasterTable:
         self.master_df["controlvideo_combined"]     = self.master_df["controlvideo_combined"].fillna("")
         self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
         self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
+        self.master_df["controlvideo_lineart"]      = self.master_df["controlvideo_lineart"].fillna("")
         
         
         
@@ -779,13 +783,14 @@ class MasterTable:
         -------
         pandas.DataFrame
             Ein DataFrame mit den Spalten:
-            - 'id'
-            - 'controlvideo_depth'
-            - 'controlvideo_normal'
-            - 'controlvideo_combined'
-            - 'n_frames'
-            - 'width'
-            - 'height'
+            - id
+            - controlvideo_depth
+            - controlvideo_normal
+            - controlvideo_combined
+            - controlvideo_lineart
+            - n_frames
+            - width
+            - height
 
         Guaranteed
         ----------
@@ -843,6 +848,9 @@ class MasterTable:
 
             elif "combined" in filestem:
                 return {"id": file_id, "controlvideo_combined": file, "n_frames": frame_count, "width": width, "height": height}
+                
+            elif "lineart" in filestem:
+                return {"id": file_id, "controlvideo_lineart": file, "n_frames": frame_count, "width": width, "height": height}
 
             else:
                 self.log(
