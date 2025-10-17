@@ -977,6 +977,8 @@ class MasterTable:
             
             else:
                 continue
+                
+            self.log(f"found file {file}:\n{df}", "log_prompt_generation")
                     
             
                     
@@ -1011,7 +1013,7 @@ class MasterTable:
                 df["prompt_neg"] = df[["prompt_neg", "prompt_neg2"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
                 df = df.drop("prompt_neg2", axis=1)
                 
-            self.log(f"Adding prompts from {file}, got this after reformatting: \n"
+            self.log(f"Reformatted df: \n"
                      f"{df}", "log_prompt_generation")
             
             
@@ -1054,8 +1056,7 @@ class MasterTable:
 
 
 
-        self.log(f"\n"
-                 f"generated Dataframe:\n"
+        self.log(f"generated Dataframe:\n"
                  f"{all_prompts}"
                  , "log_prompt_generation")
 
@@ -1072,9 +1073,8 @@ class MasterTable:
 
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
-            print(f"Unbroken Videohandler / MasterTable-Class:")
+            print(f"Unbroken Videohandler / MasterTable-Class:Log-Categories {flags}")
             print(msg)
-            print(f"Log-Categories {flags}\n")
 
     ############################################################
     # Generiert Error-Prints
