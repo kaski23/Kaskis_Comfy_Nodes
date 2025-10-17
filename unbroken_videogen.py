@@ -424,7 +424,7 @@ class Provider:
         df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_depth"]
         df.loc[df["controlvideo"] == "", "controlvideo"] = df["controlvideo_normal"]
 
-        df = df.drop(["controlvideo_combined", "controlvideo_normal", "controlvideo_depth"], axis = 1)
+        df = df.drop(["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"], axis = 1)
 
 
 
