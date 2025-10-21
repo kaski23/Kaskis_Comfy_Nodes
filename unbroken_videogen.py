@@ -39,14 +39,15 @@ class VideoHandler(ComfyNodeABC):
                 "styleframes_folder": ("STRING", {"default": ""}),
                 "prompts_folder": ("STRING", {"default": ""}),
                 "use_prompts_and_noprompts": ("BOOLEAN", {"default": True}),
+                "shift": ("FLOAT", {"default": 8.0}),
             },
             "optional": {
                 "logging_flags": ("STRING",{"default": ""}),
             }
         }
     
-    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames")
+    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT", "FLOAT")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames", "shift")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -57,6 +58,7 @@ class VideoHandler(ComfyNodeABC):
             id_by_splitting, splitting_symbol, 
             basepath, controlvideos_folder, styleframes_folder, prompts_folder, 
             use_prompts_and_noprompts,
+            shift,
             logging_flags
             ):
         # Logging - Setup
@@ -69,6 +71,7 @@ class VideoHandler(ComfyNodeABC):
                                 matchlength, 
                                 id_by_splitting, splitting_symbol, 
                                 use_prompts_and_noprompts,
+                                shift,
                                 self.logging_flags
                                 )
         df = self.provider.gen_df
@@ -91,6 +94,7 @@ class VideoHandler(ComfyNodeABC):
         height_optim    = df.iloc[index]["height_pad"]
         n_frames        = df.iloc[index]["n_frames"]
         n_frames_optim  = df.iloc[index]["n_frames_optim"]
+        shift           = df.iloc[index]["shift"]
         
         styleframes = get_styleframes(df.iloc[index]["styleframe"], width, height)
         stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height , width_optim, height_optim, n_frames)
@@ -106,7 +110,7 @@ class VideoHandler(ComfyNodeABC):
         
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
-        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim), float(shift)
         
 
 
@@ -362,6 +366,7 @@ class Provider:
         matchlength=3, 
         id_by_splitting=True, splitting_symbol="_", 
         use_prompts_and_noprompts = True,
+        base_shift = 8.0,
         debug_flags=None):
         ### Flags ###
         if debug_flags is None:
@@ -383,6 +388,7 @@ class Provider:
                         matchlength,
                         id_by_splitting,
                         splitting_symbol,
+                        base_shift,
                         debug_flags
         ).master_df
 
@@ -535,6 +541,7 @@ class MasterTable:
         matchlength = 1, 
         id_by_splitting = True, 
         splitting_symbol = "_", 
+        base_shift = 8.0,
         debug_flags = None
         ):
 
@@ -550,6 +557,9 @@ class MasterTable:
         ### Filename-to-ID-Logik
         self.id_by_splitting = id_by_splitting  # Setzen, wenn IDs aus Filenamekomponenten, die durch '_' getrennt sind generiert werden soll
         self.splitting_symbol = splitting_symbol
+        
+        ### Base-Shift zuweisen
+        self.base_shift = base_shift
 
         ### Init und Check der Variablen ###
         self.matchlength = matchlength  # Entweder Anzahl der String-Teile im Namen, die durch '_' separiert werden, oder Anzahl an Buchstaben
@@ -613,42 +623,39 @@ class MasterTable:
             , "log_init")
             
         
-
-    ############################################################
-    # Checkt den Master-df auf Fehler
-    # Erwartet wird ein df mit id, styleframe, 
-    # controlvideo_depth, controlvideo_normal, controlvideo_combined, n_frames, width, height
-    # prompt, prompt_negative
-    ############################################################
     def consolidate(self):
+
         """
-        Checkt den Master-df auf Fehler
-        
+        Konsolidiert den Master-DataFrame nach dem Mergen aller Teil-Tabellen
+        und prüft auf Vollständigkeit sowie gültige Werte.
+
+        Ablauf
+        ------
+        - Prüft, ob `master_df` leer ist.
+        - Stellt sicher, dass Pflichtspalten existieren.
+        - Ergänzt nicht-kritische Spalten falls fehlend.
+        - Überprüft, ob alle kritischen Informationen vorhanden sind
+          (id, n_frames, width, height, shift, mindestens ein Controlvideo).
+        - Füllt fehlende Werte in optionalen Spalten mit leeren Strings.
+        - Erzwingt Float-Typ und Defaultwert für `shift`.
+        - Sortiert nach `id`.
+
+        Returns
+        -------
+        None
+            Die Methode verändert `self.master_df` in-place.
+
         Guarantees
-        ------------
-        Ein Dataframe mit den Spalten:
-            - id
-            - styleframe
-            - controlvideo_depth
-            - controlvideo_normal
-            - controlvideo_combined
-            - controlvideo_lineart
-            - n_frames
-            - width
-            - height
-            - prompt
-            - prompt_negative
-            
-        Sowie validen Einträgen in:
-            - id
-            - styleframe
-            - n_frames
-            - width
-            - height
-            - controlvideo_depth || controlvideo_normal || controlvideo_combined || controlvideo_lineart
-            
-        Aufsteigend sortiert nach "id"
+        ----------
+        - `self.master_df` enthält mindestens die Spalten:
+          ['id', 'styleframe', 'n_frames', 'width', 'height', 'shift',
+           'controlvideo_combined', 'controlvideo_normal',
+           'controlvideo_depth', 'controlvideo_lineart', 'prompt', 'prompt_neg']
+        - Keine Zeilen mit fehlenden IDs, n_frames, width, height oder shift.
+        - Jede Zeile enthält mindestens ein Controlvideo.
+        - Sortierung aufsteigend nach `id`.
         """
+
         
         # Checkt, ob überhaupt etwas im DF steht
         if self.master_df.empty:
@@ -658,7 +665,7 @@ class MasterTable:
             ))
         
         
-        required_columns = ["id", "styleframe", "n_frames", "width", "height"]
+        required_columns = ["id", "styleframe", "n_frames", "width", "height", "shift"]
         controlvideo_columns = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"]
 
         # Pflichtspalten prüfen
@@ -697,6 +704,11 @@ class MasterTable:
             raise ValueError(self.print_error(
                         "master_df enthält keine height an mindestens einer Stelle"
                     ))
+                    
+        if self.master_df["shift"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keine shift an mindestens einer Stelle"
+                    ))
 
         # Checkt, ob es mindestens ein Controlvideo pro Video gibt
         cols = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"]
@@ -714,16 +726,42 @@ class MasterTable:
         self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
         self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
         self.master_df["controlvideo_lineart"]      = self.master_df["controlvideo_lineart"].fillna("")
+        self.master_df["shift"]                     = self.master_df["shift"].fillna(self.base_shift).astype(float) #Eigentlich überflüssig
         
         # Sortieren
         self.master_df = self.master_df.sort_values(by="id")
         
         
-    ############################################################
-    # Generiert einen DataFrame für die Styleframes
-    ############################################################
-
     def get_styleframe_table(self) -> pd.DataFrame:
+        """
+        Generiert einen DataFrame, der Styleframes den IDs zuordnet.
+
+        Ablauf
+        ------
+        - Durchsucht den Ordner `self.basepath / self.styleframes_folder`.
+        - Liest für jede Bilddatei die ID und die Framenummer aus.
+        - Erzeugt für jede ID eine Liste aller zugehörigen (frame_no, file)-Paare.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Mit den Spalten:
+            - id : str
+            - styleframe : list[(int, pathlib.Path)]
+              Liste von Tupeln (Frame-Nummer, Dateipfad)
+
+        Guarantees
+        ----------
+        - Jede ID kommt höchstens einmal im DataFrame vor.
+        - Doppelte IDs werden zusammengeführt und deren Frames als Liste gespeichert.
+        - Falls eine Datei keine Framenummer enthält, wird 0 eingetragen.
+
+        Not Guaranteed
+        --------------
+        - Reihenfolge der Frames innerhalb der Liste.
+        - Einheitliche Dateiendungen der Styleframes.
+        """
+        
         
         styleframe_df = pd.DataFrame(columns=["id", "styleframe"])
         style_path = self.basepath / self.styleframes_folder
@@ -767,36 +805,44 @@ class MasterTable:
 
         return styleframe_df
 
+
     def get_controlvideos_table(self) -> pd.DataFrame:
         """
-        Generiert einen DataFrame, der Controlvideo-Dateipfade den File-IDs zuordnet.
-        
-        Es werden sämtliche Dateien im Ordner `self.basepath / self.controlvideos_folder` 
-        durchsucht. Berücksichtigt werden nur Dateien mit Endungen aus `allowed_filetypes`.
+        Generiert einen DataFrame, der Controlvideo-Dateipfade den IDs zuordnet.
+
+        Ablauf
+        ------
+        - Durchsucht den Ordner `self.basepath / self.controlvideos_folder`.
+        - Berücksichtigt nur Dateien mit Endungen in `allowed_filetypes`.
+        - Extrahiert ID, Framenanzahl, Breite und Höhe über ffprobe.
+        - Ordnet die Videos anhand ihres Namens einem Typ zu 
+          (depth, normal, combined, lineart).
+        - Behandelt Konflikte (mehrere Dateien pro Typ und ID) durch Behalten
+          der ersten Datei.
 
         Returns
         -------
         pandas.DataFrame
-            Ein DataFrame mit den Spalten:
-            - id
-            - controlvideo_depth
-            - controlvideo_normal
-            - controlvideo_combined
-            - controlvideo_lineart
-            - n_frames
-            - width
-            - height
+            Mit den Spalten:
+            - id : str
+            - controlvideo_depth : pathlib.Path (optional)
+            - controlvideo_normal : pathlib.Path (optional)
+            - controlvideo_combined : pathlib.Path (optional)
+            - controlvideo_lineart : pathlib.Path (optional)
+            - n_frames : int
+            - width : int
+            - height : int
 
-        Guaranteed
+        Guarantees
         ----------
-            - Jede ID kommt höchstens einmal vor.
-            - Falls mehrere Controlvideos desselben Typs für eine ID vorhanden sind, 
-              wird nur das zuerst gefundene Video verwendet.
+        - Jede ID kommt höchstens einmal vor.
+        - Jede Zeile enthält höchstens ein Video pro Typ.
+        - Framenanzahl, width und height stammen vom jeweils zugeordneten Video.
 
         Not Guaranteed
         --------------
-            - Alle Spalten existieren in jedem Fall.
-            - Für jede ID existiert zwingend ein Eintrag.
+        - Dass für jede ID ein Video existiert.
+        - Konsistenz zwischen mehreren Typen (depth/normal/etc.) einer ID.
         """
         
         
@@ -891,7 +937,7 @@ class MasterTable:
 
         if not conflicts.empty:
             self.log(
-                f"\nWarning: Mehrere unterschiedliche Controlvideos pro ID gefunden, "
+                f"\nWarning: Mehrere Controlvideos desselben Typs pro ID gefunden, "
                 f"nur der erste wird behalten!\n{conflicts}",
                 "warnings"
             )
@@ -909,11 +955,12 @@ class MasterTable:
 
         return controlvideos_df
 
+
     def get_prompts_table(self) -> pd.DataFrame:
         """
         Generiert einen DataFrame, der Prompts zugeordnet zu IDs enthält.
         
-        Hierbei werden sämtliche .csv, .xlsx, .xlsm, .xls, .xlsb-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
+        Hierbei werden sämtliche .csv,-Dateien, die im Ordner 'self.basepath / self.prompts_folder' 
         liegen durchforstet. Verwendet werden die Spalten:
         - id
         - prompt
@@ -922,6 +969,7 @@ class MasterTable:
         - prompt_neg
         - prompt_neg1
         - prompt_neg2
+        - shift
         Nur Einträge mit gültiger ID werden verwendet. Einträge mit derselben ID in mehreren csv-Dateien werden gemerged.
         
         Returns
@@ -930,8 +978,8 @@ class MasterTable:
             
         Guarantees
         -------
-        Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg'.
-        Kann leer sein, wenn keine Inhalte gefunden wurden.
+        Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg', 'shift'.
+        Kann leer sein, wenn keine Inhalte gefunden wurden. Shift enthält dann den Wert "self.base_shift"
         """
             
         prompt_path = self.basepath / self.prompts_folder
@@ -944,8 +992,8 @@ class MasterTable:
         )
 
 
-        required_columns = {"id", "prompt", "prompt_neg"}
-        usable_columns = {"id", "prompt", "prompt1", "prompt2", "prompt_neg", "prompt_neg1", "prompt_neg2"}
+        required_columns = {"id", "prompt", "prompt_neg", "shift"}
+        usable_columns = {"id", "prompt", "prompt1", "prompt2", "prompt_neg", "prompt_neg1", "prompt_neg2", "shift"}
         
         all_prompts = pd.DataFrame(columns=list(required_columns))
 
@@ -962,13 +1010,7 @@ class MasterTable:
                 except Exception as e:
                     self.log(f"Fehler beim Einlesen von {file}: {e}", "warnings")
                     continue
-                    
-            elif file.suffix.lower() in {".xlsx", ".xlsm", ".xls", ".xlsb"}:
-                try:
-                    df = pd.read_excel(file, sheet_name=0)
-                except Exception as e:
-                    self.log(f"Fehler beim Einlesen von {file}: {e}", "warnings")
-                    continue
+
             
             else:
                 continue
@@ -987,9 +1029,14 @@ class MasterTable:
                 
             # Zeilen ohne IDs rausschmeißen
             df = df[df["id"].notna() & (df["id"] != "")]
+            
+            # Shift-Werte auf Float umwandeln
+            df["shift"] = pd.to_numeric(df["shift"], errors="coerce")  # Strings -> NaN
+            df["shift"] = df["shift"].fillna(self.base_shift).astype(float)
 
             # Nans ersetzen
             df = df.fillna("")
+            
             
             # Promptspalten kombinieren, überflüssige Kommas entfernen
             if "prompt1" in df.columns:
@@ -1018,7 +1065,8 @@ class MasterTable:
                     df.groupby("id", as_index=False)
                     .agg({
                         "prompt": lambda x: ",".join([v for v in x if v]),
-                        "prompt_neg": lambda x: ",".join([v for v in x if v])
+                        "prompt_neg": lambda x: ",".join([v for v in x if v]),
+                        "shift": "first"
                     })
                 )
 
@@ -1046,6 +1094,10 @@ class MasterTable:
                     lambda x: ",".join([v for v in x if v]), axis=1
                 )
                 all_prompts = all_prompts.drop(columns=["prompt_neg_new"])
+                
+            if "shift_new" in all_prompts.columns:
+                all_prompts["shift"] = all_prompts["shift"].fillna(all_prompts["shift_new"])
+                all_prompts = all_prompts.drop(columns=["shift_new"])
                     
 
 
@@ -1057,31 +1109,16 @@ class MasterTable:
 
         return all_prompts
 
-    #################################################################################
-    ###                           CLASS UTILITIES                                 ###
-    #################################################################################
-
-    ############################################################
-    # Generiert Log-Prints, falls die Log-Category
-    # in den self.debug_flags enthalten ist
-    ############################################################
 
     def log(self, msg, *flags):
         if not flags or all(flag in self.debug_flags for flag in flags):
             print(f"Unbroken Videohandler / MasterTable-Class:Log-Categories {flags}")
             print(msg)
 
-    ############################################################
-    # Generiert Error-Prints
-    ############################################################
 
     def print_error(self, msg):
         return "Unbroken Videohandler / MasterTable-Class: " + msg
 
-    ############################################################
-    # Gibt die Zahl x zurück, die in einem String in der Form
-    # _fx_, _fxx_, usw. vorkommt
-    ############################################################
 
     def get_frame_number_from_string(self, filestem: str = "") -> int:
         match = re.search(r"_f(\d+)_", filestem)
@@ -1099,16 +1136,33 @@ class MasterTable:
 
         return frame
 
-    ############################################################
-    # Gibt einen ID-String zurück:
-    # wenn self.id_by_splitting, dann die ersten self.matchlength
-    # String-Komponenten, die durch '_' getrennt sind
-    #
-    # wenn !self.id_by_splitting, dann die ersten self.matchlength
-    # Characters
-    ############################################################
 
     def generate_id(self, filestem: str = "") -> str:
+        """
+        Generiert eine ID aus einem Dateinamen.
+
+        Ablauf
+        ------
+        - Wenn `self.id_by_splitting = True`: 
+          Nimmt die ersten `self.matchlength` Teile, getrennt durch `self.splitting_symbol`.
+        - Wenn False:
+          Nimmt die ersten `self.matchlength` Zeichen des Filestems.
+
+        Parameters
+        ----------
+        filestem : str
+            Dateiname ohne Endung.
+
+        Returns
+        -------
+        str
+            Generierte ID.
+
+        Raises
+        ------
+        ValueError
+            Wenn der Input kein String ist oder nicht genügend Segmente enthält.
+        """
 
         if not isinstance(filestem, str):
             raise ValueError(self.print_error(f"generate_id(): \nEs wurde kein String übergeben"))
@@ -1141,11 +1195,36 @@ class MasterTable:
         else:
             return filestem[:self.matchlength]
 
-    ############################################################
-    # Gibt die Anzahl an Frames in einem Video-File zurück
-    ############################################################
 
     def get_video_infos(self, video_path: str):
+        """
+        Liest Video-Informationen über ffprobe aus.
+
+        Ablauf
+        ------
+        - Ruft ffprobe mit Optionen auf, um Frames, Breite und Höhe zu zählen.
+        - Parsed das JSON-Output.
+        - Extrahiert nb_read_frames, width, height.
+
+        Parameters
+        ----------
+        video_path : str
+            Pfad zur Videodatei.
+
+        Returns
+        -------
+        tuple
+            (frame_count : int, width : int, height : int)
+
+        Guarantees
+        ----------
+        - Gibt immer ein Tuple zurück, auch wenn einzelne Werte 0 sind.
+
+        Not Guaranteed
+        --------------
+        - Dass nb_read_frames zuverlässig verfügbar ist (bei manchen Codecs „N/A“).
+        - Dass die Datei tatsächlich ein Video ist.
+        """
         cmd = [
             "ffprobe",
             "-v", "error",
