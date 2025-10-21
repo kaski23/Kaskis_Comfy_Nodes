@@ -665,7 +665,7 @@ class MasterTable:
             ))
         
         
-        required_columns = ["id", "styleframe", "n_frames", "width", "height", "shift"]
+        required_columns = ["id", "styleframe", "n_frames", "width", "height"]
         controlvideo_columns = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"]
 
         # Pflichtspalten prüfen
@@ -682,6 +682,15 @@ class MasterTable:
         for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart", "prompt", "prompt_neg"]:
             if col not in self.master_df.columns:
                 self.master_df[col] = pd.NA
+                
+        # Falls keine Shift-Spalte existiert, initialisieren mit base_shift
+        if "shift" not in self.master_df.columns:
+            self.master_df["shift"] = self.base_shift
+
+        # Shift nach float casten, leere Strings oder NaN → base_shift
+        self.master_df["shift"] = pd.to_numeric(
+                self.master_df["shift"], errors="coerce"
+            ).fillna(self.base_shift).astype(float)            
                 
                     
         # Checkt, ob alle kritischen Infos durchgehend vorhanden sind
@@ -726,7 +735,6 @@ class MasterTable:
         self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
         self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
         self.master_df["controlvideo_lineart"]      = self.master_df["controlvideo_lineart"].fillna("")
-        self.master_df["shift"]                     = self.master_df["shift"].fillna(self.base_shift).astype(float) #Eigentlich überflüssig
         
         # Sortieren
         self.master_df = self.master_df.sort_values(by="id")
@@ -1029,10 +1037,7 @@ class MasterTable:
                 
             # Zeilen ohne IDs rausschmeißen
             df = df[df["id"].notna() & (df["id"] != "")]
-            
-            # Shift-Werte auf Float umwandeln
-            df["shift"] = pd.to_numeric(df["shift"], errors="coerce")  # Strings -> NaN
-            df["shift"] = df["shift"].fillna(self.base_shift).astype(float)
+           
 
             # Nans ersetzen
             df = df.fillna("")
@@ -1082,7 +1087,7 @@ class MasterTable:
             else:
                 all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
             
-            # prompt_new und prompt_neg_new zusammenführen
+            # prompt_new. prompt_neg_new, shift_new zusammenführen
             if "prompt_new" in all_prompts.columns:
                 all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
                     lambda x: ",".join([v for v in x if v]), axis=1
