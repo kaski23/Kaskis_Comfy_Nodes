@@ -646,6 +646,8 @@ class MasterTable:
             - width
             - height
             - controlvideo_depth || controlvideo_normal || controlvideo_combined || controlvideo_lineart
+            
+        Aufsteigend sortiert nach "id"
         """
         
         # Checkt, ob überhaupt etwas im DF steht
@@ -656,27 +658,18 @@ class MasterTable:
             ))
         
         
-        # Checkt, ob die kritischen Spalten vorhanden sind
-        required_columns = [
-                        "id", "styleframe", "controlvideo_combined", "controlvideo_normal", 
-                        "controlvideo_depth", "n_frames", "width", "height"
-                        ]
-                        
+        required_columns = ["id", "styleframe", "n_frames", "width", "height"]
+        controlvideo_columns = ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart"]
+
+        # Pflichtspalten prüfen
         for col in required_columns:
-            if (col == "controlvideo_combined") or (col == "controlvideo_normal") or (col == "controlvideo_depth") or (col == "controlvideo_lineart"):
-                if (("controlvideo_combined"    not in self.master_df.columns) 
-                and ("controlvideo_depth"       not in self.master_df.columns)
-                and ("controlvideo_normal"      not in self.master_df.columns)
-                and ("controlvideo_lineart"      not in self.master_df.columns)):
-                    raise ValueError(self.print_error(
-                        "master_df enthält keine Controlvideos"
-                    ))
-                
-            elif col not in self.master_df.columns:
-                raise ValueError(self.print_error(
-                        f"master_df enthält keine Spalte {col}"
-                    ))
-                    
+            if col not in self.master_df.columns:
+                raise ValueError(self.print_error(f"master_df enthält keine Spalte {col}"))
+
+        # Mindestens eine Controlvideo-Spalte muss existieren
+        if not any(col in self.master_df.columns for col in controlvideo_columns):
+            raise ValueError(self.print_error("master_df enthält keine Controlvideos"))
+
                     
         # Nachträglich nichtkritische Spalten ergänzen, sollte eine Spalte nicht vorhanden sein
         for col in ["controlvideo_combined", "controlvideo_normal", "controlvideo_depth", "controlvideo_lineart", "prompt", "prompt_neg"]:
@@ -716,12 +709,14 @@ class MasterTable:
         
         # Aufräumen
         self.master_df["prompt"]                    = self.master_df["prompt"].fillna("")
-        self.master_df["prompt_neg"]                    = self.master_df["prompt_neg"].fillna("")
+        self.master_df["prompt_neg"]                = self.master_df["prompt_neg"].fillna("")
         self.master_df["controlvideo_combined"]     = self.master_df["controlvideo_combined"].fillna("")
         self.master_df["controlvideo_normal"]       = self.master_df["controlvideo_normal"].fillna("")
         self.master_df["controlvideo_depth"]        = self.master_df["controlvideo_depth"].fillna("")
         self.master_df["controlvideo_lineart"]      = self.master_df["controlvideo_lineart"].fillna("")
         
+        # Sortieren
+        self.master_df = self.master_df.sort_values(by="id")
         
         
     ############################################################
