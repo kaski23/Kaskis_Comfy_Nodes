@@ -373,7 +373,7 @@ class Provider:
         self.log_current = "log_provider"
 
         ### Object Variables ###
-        self.possible_resolutions = [(512, 512), (848, 480), (480, 848), (1024, 1024), (1280, 720), (720, 1280)]
+        self.possible_resolutions = [(512, 512), (832, 480), (480, 832), (1024, 1024), (1280, 720), (720, 1280)]
 
         self.gen_df = MasterTable(
                         basepath, 
