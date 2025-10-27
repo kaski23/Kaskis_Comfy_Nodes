@@ -5,6 +5,7 @@ from .switch import PairSwitchNode
 from .converter import IntToString
 from .unbroken_videogen import VideoHandler
 from .unbroken_controlvideos import CollectVideoNode
+from .preview_image_limited_resolution import PreviewImageLimited
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -14,6 +15,7 @@ NODE_CLASS_MAPPINGS = {
     "PairSwitchNode": PairSwitchNode,
     "Unbroken-Video-Handler": VideoHandler,
     "CollectVideoNode": CollectVideoNode,
+    "PreviewImageLimited": PreviewImageLimited,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -24,4 +26,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PairSwitchNode": "Pair Switch",
     "VideoHandler": "Unbroken-Video-Handler",
     "CollectVideoNode": "Unbroken-Controlvideo-Handler",
+    "PreviewImageLimited": "Preview Image (MP Limit)",
 }
