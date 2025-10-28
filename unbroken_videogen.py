@@ -40,14 +40,15 @@ class VideoHandler(ComfyNodeABC):
                 "prompts_folder": ("STRING", {"default": ""}),
                 "use_prompts_and_noprompts": ("BOOLEAN", {"default": True}),
                 "shift": ("FLOAT", {"default": 8.0}),
+                "seed": ("INT", {"default": 0}),
             },
             "optional": {
                 "logging_flags": ("STRING",{"default": ""}),
             }
         }
     
-    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT", "FLOAT")
-    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames", "shift")
+    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "INT")
+    RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames", "shift", "seed")
     FUNCTION = "main"
     CATEGORY = "UNBROKEN-specific"
     
@@ -59,6 +60,7 @@ class VideoHandler(ComfyNodeABC):
             basepath, controlvideos_folder, styleframes_folder, prompts_folder, 
             use_prompts_and_noprompts,
             shift,
+            seed,
             logging_flags
             ):
         # Logging - Setup
@@ -72,6 +74,7 @@ class VideoHandler(ComfyNodeABC):
                                 id_by_splitting, splitting_symbol, 
                                 use_prompts_and_noprompts,
                                 shift,
+                                seed,
                                 self.logging_flags
                                 )
         df = self.provider.gen_df
@@ -95,6 +98,7 @@ class VideoHandler(ComfyNodeABC):
         n_frames        = df.iloc[index]["n_frames"]
         n_frames_optim  = df.iloc[index]["n_frames_optim"]
         shift           = df.iloc[index]["shift"]
+        seed            = df.iloc[index]["seed"]
         
         styleframes = get_styleframes(df.iloc[index]["styleframe"], width, height)
         stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height , width_optim, height_optim, n_frames)
@@ -367,6 +371,7 @@ class Provider:
         id_by_splitting=True, splitting_symbol="_", 
         use_prompts_and_noprompts = True,
         base_shift = 8.0,
+        seed = 0,
         debug_flags=None):
         ### Flags ###
         if debug_flags is None:
@@ -389,6 +394,7 @@ class Provider:
                         id_by_splitting,
                         splitting_symbol,
                         base_shift,
+                        seed,
                         debug_flags
         ).master_df
 
@@ -542,6 +548,7 @@ class MasterTable:
         id_by_splitting = True, 
         splitting_symbol = "_", 
         base_shift = 8.0,
+        base_seed = 0,
         debug_flags = None
         ):
 
@@ -558,13 +565,14 @@ class MasterTable:
         self.id_by_splitting = id_by_splitting  # Setzen, wenn IDs aus Filenamekomponenten, die durch '_' getrennt sind generiert werden soll
         self.splitting_symbol = splitting_symbol
         
-        ### Base-Shift zuweisen
+        ### Base-Shift + seed zuweisen
         self.base_shift = base_shift
+        self.base_seed  = base_seed
 
         ### Init und Check der Variablen ###
         self.matchlength = matchlength  # Entweder Anzahl der String-Teile im Namen, die durch '_' separiert werden, oder Anzahl an Buchstaben
-        self.basepath = Path(basepath)
-        self.subfolders = [f.name for f in self.basepath.iterdir() if f.is_dir()]
+        self.basepath    = Path(basepath)
+        self.subfolders  = [f.name for f in self.basepath.iterdir() if f.is_dir()]
 
         self.log(
             f"path_generation-log from 'init()':\n"
@@ -637,7 +645,7 @@ class MasterTable:
         - Überprüft, ob alle kritischen Informationen vorhanden sind
           (id, n_frames, width, height, shift, mindestens ein Controlvideo).
         - Füllt fehlende Werte in optionalen Spalten mit leeren Strings.
-        - Erzwingt Float-Typ und Defaultwert für `shift`.
+        - Erzwingt Float-Typ und Defaultwert für `shift` und Int für 'seed'
         - Sortiert nach `id`.
 
         Returns
@@ -648,7 +656,7 @@ class MasterTable:
         Guarantees
         ----------
         - `self.master_df` enthält mindestens die Spalten:
-          ['id', 'styleframe', 'n_frames', 'width', 'height', 'shift',
+          ['id', 'styleframe', 'n_frames', 'width', 'height', 'shift', 'seed',
            'controlvideo_combined', 'controlvideo_normal',
            'controlvideo_depth', 'controlvideo_lineart', 'prompt', 'prompt_neg']
         - Keine Zeilen mit fehlenden IDs, n_frames, width, height oder shift.
@@ -686,11 +694,21 @@ class MasterTable:
         # Falls keine Shift-Spalte existiert, initialisieren mit base_shift
         if "shift" not in self.master_df.columns:
             self.master_df["shift"] = self.base_shift
+            
+        # Falls keine Seed-Spalte existiert, initialisieren mit base_seed
+        if "shift" not in self.master_df.columns:
+            self.master_df["seed"] = self.base_seed
 
         # Shift nach float casten, leere Strings oder NaN → base_shift
         self.master_df["shift"] = pd.to_numeric(
                 self.master_df["shift"], errors="coerce"
-            ).fillna(self.base_shift).astype(float)            
+            ).fillna(self.base_shift).astype(float)
+
+        # Seed nach int casten, leere Strings oder NaN → base_seed
+        self.master_df["seed"] = pd.to_numeric(
+                self.master_df["seed"], errors="coerce"
+            ).fillna(self.base_seed).astype(int)     
+            
                 
                     
         # Checkt, ob alle kritischen Infos durchgehend vorhanden sind
@@ -717,6 +735,11 @@ class MasterTable:
         if self.master_df["shift"].isna().any():
             raise ValueError(self.print_error(
                         "master_df enthält keine shift an mindestens einer Stelle"
+                    ))
+                    
+        if self.master_df["seed"].isna().any():
+            raise ValueError(self.print_error(
+                        "master_df enthält keinen seed an mindestens einer Stelle"
                     ))
 
         # Checkt, ob es mindestens ein Controlvideo pro Video gibt
@@ -978,6 +1001,7 @@ class MasterTable:
         - prompt_neg1
         - prompt_neg2
         - shift
+        - seed
         Nur Einträge mit gültiger ID werden verwendet. Einträge mit derselben ID in mehreren csv-Dateien werden gemerged.
         
         Returns
@@ -986,8 +1010,8 @@ class MasterTable:
             
         Guarantees
         -------
-        Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg', 'shift'.
-        Kann leer sein, wenn keine Inhalte gefunden wurden. Shift enthält dann den Wert "self.base_shift"
+        Der DataFrame besteht aus den Spalten 'id', 'prompt', 'prompt_neg', 'shift', 'seed'.
+        Leere Zellen = "" wenn keine Inhalte gefunden wurden.
         """
             
         prompt_path = self.basepath / self.prompts_folder
@@ -1000,8 +1024,8 @@ class MasterTable:
         )
 
 
-        required_columns = {"id", "prompt", "prompt_neg", "shift"}
-        usable_columns = {"id", "prompt", "prompt1", "prompt2", "prompt_neg", "prompt_neg1", "prompt_neg2", "shift"}
+        required_columns = {"id", "prompt", "prompt_neg", "shift", "seed"}
+        usable_columns = required_columns | {"prompt1", "prompt2", "prompt_neg1", "prompt_neg2"}
         
         all_prompts = pd.DataFrame(columns=list(required_columns))
 
@@ -1042,7 +1066,7 @@ class MasterTable:
             # Nans ersetzen
             df = df.fillna("")
             
-            
+
             # Promptspalten kombinieren, überflüssige Kommas entfernen
             if "prompt1" in df.columns:
                 df["prompt"] = df[["prompt", "prompt1"]].agg(lambda x: ",".join(filter(None, x)), axis=1)
@@ -1072,6 +1096,7 @@ class MasterTable:
                         "prompt": lambda x: ",".join([v for v in x if v]),
                         "prompt_neg": lambda x: ",".join([v for v in x if v]),
                         "shift": "first"
+                        "seed": "first"
                     })
                 )
 
@@ -1087,7 +1112,7 @@ class MasterTable:
             else:
                 all_prompts = all_prompts.merge(df, on="id", how="outer", suffixes=("", "_new"))
             
-            # prompt_new. prompt_neg_new, shift_new zusammenführen
+            # prompt_new. prompt_neg_new, shift_new, seed_new zusammenführen
             if "prompt_new" in all_prompts.columns:
                 all_prompts["prompt"] = all_prompts[["prompt", "prompt_new"]].fillna("").agg(
                     lambda x: ",".join([v for v in x if v]), axis=1
@@ -1103,6 +1128,10 @@ class MasterTable:
             if "shift_new" in all_prompts.columns:
                 all_prompts["shift"] = all_prompts["shift"].fillna(all_prompts["shift_new"])
                 all_prompts = all_prompts.drop(columns=["shift_new"])
+                
+            if "seed_new" in all_prompts.columns:
+                all_prompts["seed"] = all_prompts["seed"].fillna(all_prompts["seed_new"])
+                all_prompts = all_prompts.drop(columns=["seed_new"])
                     
 
 
