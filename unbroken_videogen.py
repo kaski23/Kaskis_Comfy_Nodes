@@ -1095,7 +1095,7 @@ class MasterTable:
                     .agg({
                         "prompt": lambda x: ",".join([v for v in x if v]),
                         "prompt_neg": lambda x: ",".join([v for v in x if v]),
-                        "shift": "first"
+                        "shift": "first",
                         "seed": "first"
                     })
                 )
