@@ -38,7 +38,7 @@ class VideoHandler(ComfyNodeABC):
                 "controlvideos_folder": ("STRING", {"default": ""}),
                 "styleframes_folder": ("STRING", {"default": ""}),
                 "prompts_folder": ("STRING", {"default": ""}),
-                "use_prompts_and_noprompts": ("BOOLEAN", {"default": True}),
+                "use_prompts_and_noprompts": ("BOOLEAN", {"default": False}),
                 "extend_video_for_optimal_framecount": ("BOOLEAN", {"default": True}),
                 "shift": ("FLOAT", {"default": 8.0}),
                 "seed": ("INT", {"default": 0}),
