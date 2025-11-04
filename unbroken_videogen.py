@@ -39,6 +39,7 @@ class VideoHandler(ComfyNodeABC):
                 "styleframes_folder": ("STRING", {"default": ""}),
                 "prompts_folder": ("STRING", {"default": ""}),
                 "use_prompts_and_noprompts": ("BOOLEAN", {"default": True}),
+                "extend_video_for_optimal_framecount": ("BOOLEAN", {"default": True}),
                 "shift": ("FLOAT", {"default": 8.0}),
                 "seed": ("INT", {"default": 0}),
             },
@@ -59,6 +60,7 @@ class VideoHandler(ComfyNodeABC):
             id_by_splitting, splitting_symbol, 
             basepath, controlvideos_folder, styleframes_folder, prompts_folder, 
             use_prompts_and_noprompts,
+            extend_video_for_optimal_framecount,
             shift,
             seed,
             logging_flags
@@ -104,9 +106,15 @@ class VideoHandler(ComfyNodeABC):
         stylevideo, mask, largest_styleframe_index = generate_stylevideo(df.iloc[index]["styleframe"], width, height , width_optim, height_optim, n_frames)
         
         # Kürzen der Videotensoren auf die optimale Frame-Anzahl
-        controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_styleframe_index >= n_frames_optim)
-        stylevideo   = shorten_tensor(stylevideo,   n_frames_optim, largest_styleframe_index >= n_frames_optim)
-        mask         = shorten_tensor(mask,         n_frames_optim, largest_styleframe_index >= n_frames_optim)
+        if extend_video_for_optimal_framecount:
+            controlvideo = lengthen_tensor(controlvideo, n_frames_optim+4)
+            stylevideo   = lengthen_tensor(stylevideo,   n_frames_optim+4)
+            mask         = lengthen_tensor(mask,         n_frames_optim+4)
+            
+        else:
+            controlvideo = shorten_tensor(controlvideo, n_frames_optim, largest_styleframe_index >= n_frames_optim)
+            stylevideo   = shorten_tensor(stylevideo,   n_frames_optim, largest_styleframe_index >= n_frames_optim)
+            mask         = shorten_tensor(mask,         n_frames_optim, largest_styleframe_index >= n_frames_optim)
         
         # Resizing des Controlvideos auf optimale Auflösung
         controlvideo = resize_and_pad(controlvideo, width_optim, height_optim)
@@ -114,7 +122,7 @@ class VideoHandler(ComfyNodeABC):
         
         print(f"Unbroken Video Handler: Using Entry {index} of {len(df)}, starting generation at {datetime.now()}")
 
-        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim), float(shift)
+        return str(video_id), controlvideo, stylevideo, styleframes, mask, str(prompt), str(prompt_neg), int(width_optim), int(height_optim), int(n_frames_optim), float(shift), int(seed)
         
 
 
@@ -127,7 +135,6 @@ def get_styleframes(styleframe_tupel, width: int, height: int) -> torch.Tensor:
     
     # Liste von [1, H, W, 3] → [N, H, W, 3]
     return torch.cat(tensors, dim=0)
-
 
 def generate_stylevideo(styleframe_tupel, width: int, height: int, width_optim: int, height_optim: int, n_frames: int):
     
@@ -158,7 +165,6 @@ def generate_stylevideo(styleframe_tupel, width: int, height: int, width_optim: 
 
     return video, mask, largest_index
     
-
 def load_image_as_comfy_tensor(path: str, width: int, height: int) -> torch.Tensor:
     """
     Lädt ein Bild (png, jpg, jpeg) und gibt einen Comfy-kompatiblen Torch-Tensor zurück.
@@ -173,7 +179,6 @@ def load_image_as_comfy_tensor(path: str, width: int, height: int) -> torch.Tens
     tensor = torch.from_numpy(arr)[None, ...]  # [1, H, W, 3]
     
     return tensor
-  
   
 def load_video_as_comfy_tensor(path: str, to_float: bool = True) -> torch.Tensor:
     """
@@ -242,7 +247,6 @@ def load_video_as_comfy_tensor(path: str, to_float: bool = True) -> torch.Tensor
     else:
         return torch.from_numpy(video).byte()
 
-
 def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Tensor, torch.Tensor):
     """
     Erzeugt einen neutralgrauen Video-Tensor.
@@ -262,6 +266,37 @@ def generate_wan_nullInput(width: int, height: int, n_frames: int) -> (torch.Ten
             torch.full((n_frames, height, width), 0.0)
     )
 
+def lengthen_tensor(t: torch.Tensor, desired_length: int) -> torch.Tensor:
+    """
+    Verlängert einen Tensor entlang der 0-ten Dimension (Batch),
+    indem der letzte Eintrag wiederholt wird.
+
+    Args:
+        t (torch.Tensor): Eingabetensor.
+        desired_length (int): Ziel-Länge entlang der 0-ten Dimension.
+
+    Returns:
+        torch.Tensor: Verlängerter Tensor.
+    """
+    current_length = t.shape[0]
+
+    if desired_length < current_length:
+        raise ValueError(
+            f"desired_length ({desired_length}) ist kleiner als Batch-Länge ({current_length}). "
+            f"Nutze shorten_tensor dafür."
+        )
+
+    if desired_length == current_length:
+        return t
+
+    # Anzahl der fehlenden Einträge
+    missing = desired_length - current_length
+    
+    # letzten Frame duplizieren
+    last = t[-1:]                       # shape [1, ...]
+    repeat = last.repeat(missing, *([1] * (last.dim() - 1)))
+    
+    return torch.cat([t, repeat], dim=0)
 
 def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: bool = False) -> torch.Tensor:
     """
@@ -286,7 +321,6 @@ def shorten_tensor(t: torch.Tensor, desired_length: int, drop_first_entries: boo
         return t[-desired_length:]   # behält die letzten
     else:
         return t[:desired_length]    # behält die ersten
-
 
 def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
     """
@@ -337,7 +371,6 @@ def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) 
     else:
         raise ValueError(f"Expected [F, W, H, C] or [F, H, W], got {images.shape}")
 
-
 def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
     """
     Streckt Bilder oder Masken auf gewünschte Aspect Ratio.
@@ -360,7 +393,6 @@ def resize_to_aspect(images: torch.Tensor, aspect_ratio: float) -> torch.Tensor:
     else:
         raise ValueError(f"Expected [F, H, W, C] or [F, H, W], got {images.shape}")
 
- 
  
  
 class Provider:
@@ -414,7 +446,7 @@ class Provider:
             axis=1, result_type="expand"
         )
         
-        #Berechnet die optimale Framerate
+        #Berechnet die optimale Frameanzahl
         df["n_frames_optim"] = df.apply(
             lambda r: self.optimal_frame_length(r["n_frames"]),
             axis=1
@@ -536,8 +568,6 @@ class Provider:
         return width_out, height_out
         
         
-
-
 
 class MasterTable:
 
