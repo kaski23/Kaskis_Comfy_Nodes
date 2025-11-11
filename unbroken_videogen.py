@@ -42,9 +42,13 @@ class VideoHandler(ComfyNodeABC):
                 "extend_video_for_optimal_framecount": ("BOOLEAN", {"default": True}),
                 "shift": ("FLOAT", {"default": 8.0}),
                 "seed": ("INT", {"default": 0}),
+                "write_kill_file": ("BOOLEAN", {"default": False}),
+                "killfile_path": ("STRING", {"default": ""}),
+                
             },
             "optional": {
                 "logging_flags": ("STRING",{"default": ""}),
+                "kill_tw": ("STRING", {"default": "KILL"}),
             }
         }
     
@@ -63,7 +67,10 @@ class VideoHandler(ComfyNodeABC):
             extend_video_for_optimal_framecount,
             shift,
             seed,
-            logging_flags
+            write_kill_file,
+            killfile_path,
+            logging_flags,
+            kill_tw
             ):
         # Logging - Setup
         self.logging_flags = set(
@@ -80,12 +87,33 @@ class VideoHandler(ComfyNodeABC):
                                 self.logging_flags
                                 )
         df = self.provider.gen_df
-        
-        # Index-Plausibility-Check-
+                
+
+        # Index-Plausibility-Check & Kill-File
         if index < 0 or index >= len(df):
+            if write_kill_file and killfile_path:
+                kill_path = Path(killfile_path)
+
+
+                # Sicherstellen, dass der Ordner existiert — sonst Fehler werfen
+                if not kill_path.parent.exists():
+                    raise FileNotFoundError(
+                        f"Ordner für Kill-File existiert nicht: {kill_path.parent}"
+                    )
+                
+                # Sicherstellen, dass tatsächlich eine Datei übergeben wurde
+                if kill_path.exists() and kill_path.is_dir():
+                    raise IsADirectoryError(f"Kill-File Pfad ist ein Ordner, keine Datei: {kill_path}")
+
+                try:
+                    kill_path.write_text(str(kill_tw), encoding="utf-8")
+                except Exception as e:
+                    raise RuntimeError(f"Kill-File konnte nicht geschrieben werden: {e}")
+
             raise IndexError(
                 f"Index {index} liegt außerhalb des gültigen Bereichs (0 – {len(df)-1})"
             )
+
                 
         
         # Setup der einzelnen Return-Variablen
