@@ -55,7 +55,7 @@ class VideoHandler(ComfyNodeABC):
     RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "IMAGE", "MASK", "STRING", "STRING", "INT", "INT", "INT", "FLOAT", "INT")
     RETURN_NAMES = ("Video-ID", "Controlvideo", "Stylevideo","Styleframes", "Stylevideo-Mask", "Prompt","Prompt_negative", "width", "height", "n_frames", "shift", "seed")
     FUNCTION = "main"
-    CATEGORY = "UNBROKEN-specific"
+    CATEGORY = "Unbroken"
     
     def main(
             self, 

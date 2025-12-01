@@ -4,8 +4,9 @@ from .string_split_select import StringSplitSelect
 from .switch import PairSwitchNode
 from .converter import IntToString
 from .unbroken_videogen import VideoHandler
-from .unbroken_controlvideos import CollectVideoNode
+from .unbroken_controlvideos import CollectKeyedVideosNode
 from .preview_image_limited_resolution import PreviewImageLimited
+from .unbroken_video_batch import CollectVideosNode
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -14,7 +15,8 @@ NODE_CLASS_MAPPINGS = {
     "IntToString": IntToString,
     "PairSwitchNode": PairSwitchNode,
     "Unbroken-Video-Handler": VideoHandler,
-    "CollectVideoNode": CollectVideoNode,
+    "CollectKeyedVideosNode": CollectKeyedVideosNode,
+    "CollectVideosNode": CollectVideosNode,
     "PreviewImageLimited": PreviewImageLimited,
 }
 
@@ -25,6 +27,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "IntToString": "Int → String",
     "PairSwitchNode": "Pair Switch",
     "VideoHandler": "Unbroken-Video-Handler",
-    "CollectVideoNode": "Unbroken-Controlvideo-Handler",
+    "CollectKeyedVideosNode": "Unbroken-Controlvideo-Handler",
+    "CollectVideosNode": "Unbroken-Video-Batchloader",
     "PreviewImageLimited": "Preview Image (MP Limit)",
 }
