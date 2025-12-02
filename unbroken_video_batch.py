@@ -3,7 +3,9 @@ from pathlib import Path
 from datetime import datetime
 from huggingface_hub import snapshot_download
 import cv2
+import subprocess
 import torch
+import numpy as np
 from ultralytics import YOLO
 from torchvision import transforms
 
@@ -193,44 +195,64 @@ class CollectVideosNode(ComfyNodeABC):
 
 
     def extract_first_last_frames(self, video_path: str):
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            raise IOError(f"Cannot open video: {video_path}")
+        """
+        Liest mit ffmpeg den ersten und letzten Frame eines Videos
+        und gibt (first_tensor, last_tensor, frame_count) zurück.
 
-        # ---- First frame lesen ----
-        ok, first = cap.read()
-        if not ok:
-            cap.release()
-            raise ValueError("Video contains no readable frames")
+        Tensorshape: (1, H, W, C) in float32, Werte 0..1
+        """
 
-        # ---- Letzten sinnvollen Frame indexieren ----
-        reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        last_index = reported_frames - 1
+        # --- Anzahl Frames bestimmen ---
+        # ffprobe liefert die Frame-Anzahl
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-count_frames",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=nb_read_frames",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path
+        ]
+        out = subprocess.check_output(cmd).decode("utf-8").strip()
+        try:
+            frame_count = int(out)
+        except ValueError:
+            raise RuntimeError(f"Keine valide Frame-Anzahl aus ffprobe: {out}")
 
-        # Versuche den letzten Frame zu lesen
-        cap.set(cv2.CAP_PROP_POS_FRAMES, last_index)
-        ok, last = cap.read()
+        if frame_count <= 0:
+            raise RuntimeError("Video hat 0 Frames")
 
-        # Wenn nicht lesbar → fallback: gehe rückwärts
-        if not ok:
-            fallback_idx = last_index - 1
-            cap.set(cv2.CAP_PROP_POS_FRAMES, fallback_idx)
-            ok, last = cap.read()
-            if ok:
-                last_index = fallback_idx  # aktualisieren
-            else:
-                cap.release()
-                raise ValueError("Failed to read any valid last frame")
+        # ffmpeg-Befehl zum Extrahieren eines spezifischen Frames
+        def extract_frame(index: int):
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", video_path,
+                "-vf", f"select=eq(n\\,{index})",
+                "-vframes", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "pipe:1"
+            ]
+            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            img_bytes, _ = pipe.communicate()
+            if pipe.returncode != 0 or not img_bytes:
+                raise RuntimeError(f"Frame {index} konnte nicht extrahiert werden")
 
-        cap.release()
+            # PNG in numpy
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)  # BGR
+            if frame is None:
+                raise RuntimeError(f"Decoding des Frames {index} fehlgeschlagen")
 
-        # ---- Frame → Tensor helper ----
-        def to_tensor(frame):
+            # Convert BGR → RGB + Normalisierung
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            return torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
+            tensor = torch.from_numpy(frame).float() / 255.0  # H,W,C
+            tensor = tensor.unsqueeze(0)  # B,H,W,C (Batch=1)
+            return tensor.contiguous()
 
-        return (
-            to_tensor(first).permute(1, 2, 0).contiguous().unsqueeze(0),
-            to_tensor(last).permute(1, 2, 0).contiguous().unsqueeze(0),
-            last_index,
-        )
+        first = extract_frame(0)
+        last = extract_frame(frame_count - 1)
+
+        return first, last, frame_count
+
