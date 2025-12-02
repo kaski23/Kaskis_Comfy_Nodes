@@ -2,17 +2,20 @@ import re
 from pathlib import Path
 from datetime import datetime
 from huggingface_hub import snapshot_download
-
-from comfy.comfy_types import ComfyNodeABC, IO
-from comfy_api.input_impl import VideoFromFile
-
 import cv2
 import torch
 from ultralytics import YOLO
 from torchvision import transforms
 
+from comfy.comfy_types import ComfyNodeABC, IO
+from comfy_api.input_impl import VideoFromFile
+from comfy.utils import ProgressBar
 
-BASE_DIR = Path(__file__).resolve().parent
+
+
+
+KASKIS_BASE_DIR = Path(__file__).resolve().parent
+KASKIS_YOLO_MODEL = None
 
 class VideoFileCollector:
     VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".mpeg"}
@@ -51,9 +54,16 @@ class VideoFileCollector:
         return files
 
 class VideoFaceAnalysis:
-    def __init__(self, video_path):
-        self.weights_path = BASE_DIR / "models" / "face_yolov9c.pt"
-        self.video_path = Path(video_path)
+    def __init__(self, video_path, frames_total, enableDebugMsg, progress_callback=None):
+        self.weights_path   = KASKIS_BASE_DIR / "models" / "face_yolov9c.pt"
+        self.video_path     = Path(video_path)
+        self.frames_total   = frames_total
+        self.enableDebugMsg = enableDebugMsg
+        
+        self.progress = progress_callback
+        self.progress_start = 150
+        self.progress_end   = 900
+        self.progress_step  = self.progress_step  = 0 if frames_total <= 0 else (self.progress_end - self.progress_start) / frames_total
         
     def get_frames_score_yolo(self):
         """
@@ -62,7 +72,16 @@ class VideoFaceAnalysis:
         """
 
         # YOLO-Modell laden
-        model = YOLO(self.weights_path)
+        global KASKIS_YOLO_MODEL
+        if KASKIS_YOLO_MODEL is None:
+            if self.enableDebugMsg:
+                print("Loading YOLO face model once")
+            KASKIS_YOLO_MODEL = YOLO(str(self.weights_path))
+        
+        model = KASKIS_YOLO_MODEL
+        if self.enableDebugMsg:
+            print(f"loaded Model")
+        self.progress(self.progress_start)
 
         cap = cv2.VideoCapture(self.video_path)
         transform = transforms.ToTensor()
@@ -81,8 +100,8 @@ class VideoFaceAnalysis:
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
             # Current Frame
-            current_frame_no = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
-
+            current_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+            
             # Run inference, disable training helpers, single Frame inference, so lets drop the batch-dimension
             results = model(frame_rgb, verbose=False)[0]
 
@@ -98,7 +117,12 @@ class VideoFaceAnalysis:
             score = (areas * confs).sum()
 
             if score > best_score:
-                best_score, best_frame, best_frame_no = score, frame_rgb, current_frame_no
+                best_score, best_frame, best_frame_no = score, frame_rgb, current_frame_idx
+                
+            if self.enableDebugMsg:
+                print(f"processed frame {current_frame_idx}")
+            progress_value = int(self.progress_start + self.progress_step * current_frame_idx)
+            self.progress(progress_value)
                 
 
         cap.release()
@@ -118,7 +142,7 @@ class CollectVideosNode(ComfyNodeABC):
             "required": {
                 "folderpath": ("STRING", {"default": ""}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
-                "useUnbrokenIDs": ("BOOLEAN", {"default": False}),
+                "useUnbrokenIDs": ("BOOLEAN", {"default": True}),
                 "enableDebugMsg": ("BOOLEAN", {"default": False}),
             }
         }
@@ -130,20 +154,37 @@ class CollectVideosNode(ComfyNodeABC):
 
     def run(self, folderpath: str, index: int, useUnbrokenIDs: bool, enableDebugMsg: bool):
         
+        if enableDebugMsg:
+            print(f"Unbroken Video Handler: Starting collection at {datetime.now()}")
+            
         collector = VideoFileCollector(folderpath, useUnbrokenIDs)
+        pbar = ProgressBar(1000)
+        progress = pbar.update_absolute
+        
 
         if not (0 <= index < len(collector.files)):
             raise IndexError(f"Index {index} out of range, total files: {len(collector.files)}")
-
+        
         video_path, file_id = collector.files[index]
+        progress(50)
         
         first_frame, last_frame, last_index = self.extract_first_last_frames(video_path)
+        if enableDebugMsg:
+            print(f"Extracted first and last frame at {datetime.now()}")
+        progress(100)
         
-        analyzer = VideoFaceAnalysis(video_path)
+        
+        if enableDebugMsg:
+            print(f"Started Video Scoring at {datetime.now()}")
+            
+        analyzer = VideoFaceAnalysis(video_path, last_index, enableDebugMsg, progress)
         best_frame, best_index = analyzer.get_frames_score_yolo()
         
         if enableDebugMsg:
-            print(f"Unbroken Video Handler: Starting collection at {datetime.now()}")
+            print(f"Finished Video Scoring at {datetime.now()}")
+        progress(1000)
+        
+        if enableDebugMsg:
             print(f"Unbroken Video Handler: Using Entry {index} of {len(collector.files)}, getting filepath {video_path} and file-ID {file_id}")
             print(f"Unbroken Video Handler: Found best frame at index {best_index}, Index of last Frame is {last_index}")
             
