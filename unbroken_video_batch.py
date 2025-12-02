@@ -91,6 +91,8 @@ class VideoFaceAnalysis:
         best_frame_no = 0
         best_frame = None
         best_score = 0
+        mid_frame = None
+        mid_frame_no = 0
 
         while True:
             #Iteriert durch das Video, verlässt den While-Loop nach dem letzten Frame
@@ -103,6 +105,10 @@ class VideoFaceAnalysis:
 
             # Current Frame
             current_frame_idx = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+            
+            if int(self.frames_total/2) == current_frame_idx:
+                mid_frame = frame_rgb
+                mid_frame_no = int(self.frames_total/2)
             
             # Run inference, disable training helpers, single Frame inference, so lets drop the batch-dimension
             results = model(frame_rgb, verbose=False)[0]
@@ -130,13 +136,11 @@ class VideoFaceAnalysis:
         cap.release()
 
         if best_frame is None:
-            return None, 0
+             best_frame, best_frame_no = mid_frame, mid_frame_no
 
         best_frame_torch = transform(best_frame).float()  # C,H,W als Float 0..1
         return best_frame_torch.permute(1, 2, 0).contiguous().unsqueeze(0), best_frame_no
     
-
-
 class CollectVideosNode(ComfyNodeABC):
     @classmethod
     def INPUT_TYPES(cls):
