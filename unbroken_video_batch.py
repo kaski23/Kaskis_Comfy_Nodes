@@ -197,22 +197,40 @@ class CollectVideosNode(ComfyNodeABC):
         if not cap.isOpened():
             raise IOError(f"Cannot open video: {video_path}")
 
+        # ---- First frame lesen ----
         ok, first = cap.read()
         if not ok:
             cap.release()
             raise ValueError("Video contains no readable frames")
 
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        last_index = frame_count - 1
+        # ---- Letzten sinnvollen Frame indexieren ----
+        reported_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        last_index = reported_frames - 1
 
+        # Versuche den letzten Frame zu lesen
         cap.set(cv2.CAP_PROP_POS_FRAMES, last_index)
         ok, last = cap.read()
-        cap.release()
-        if not ok:
-            raise ValueError("Failed to read last frame")
 
+        # Wenn nicht lesbar → fallback: gehe rückwärts
+        if not ok:
+            fallback_idx = last_index - 1
+            cap.set(cv2.CAP_PROP_POS_FRAMES, fallback_idx)
+            ok, last = cap.read()
+            if ok:
+                last_index = fallback_idx  # aktualisieren
+            else:
+                cap.release()
+                raise ValueError("Failed to read any valid last frame")
+
+        cap.release()
+
+        # ---- Frame → Tensor helper ----
         def to_tensor(frame):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             return torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
 
-        return to_tensor(first).permute(1, 2, 0).contiguous().unsqueeze(0), to_tensor(last).permute(1, 2, 0).contiguous().unsqueeze(0), last_index
+        return (
+            to_tensor(first).permute(1, 2, 0).contiguous().unsqueeze(0),
+            to_tensor(last).permute(1, 2, 0).contiguous().unsqueeze(0),
+            last_index,
+        )
