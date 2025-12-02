@@ -107,7 +107,7 @@ class VideoFaceAnalysis:
             return None, 0
 
         best_frame_torch = transform(best_frame).float()  # C,H,W als Float 0..1
-        return best_frame_torch.permute(1, 2, 0).contiguous(), best_frame_no
+        return best_frame_torch.permute(1, 2, 0).contiguous().unsqueeze(0), best_frame_no
     
 
 
@@ -174,4 +174,4 @@ class CollectVideosNode(ComfyNodeABC):
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             return torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
 
-        return to_tensor(first).permute(1, 2, 0).contiguous(), to_tensor(last).permute(1, 2, 0).contiguous(), last_index
+        return to_tensor(first).permute(1, 2, 0).contiguous().unsqueeze(0), to_tensor(last).permute(1, 2, 0).contiguous().unsqueeze(0), last_index
