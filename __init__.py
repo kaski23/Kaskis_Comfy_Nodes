@@ -7,6 +7,7 @@ from .unbroken_videogen import VideoHandler
 from .unbroken_controlvideos import CollectKeyedVideosNode
 from .preview_image_limited_resolution import PreviewImageLimited
 from .unbroken_video_batch import CollectVideosNode
+from .async_delay import ImageDelay
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -18,6 +19,7 @@ NODE_CLASS_MAPPINGS = {
     "CollectKeyedVideosNode": CollectKeyedVideosNode,
     "CollectVideosNode": CollectVideosNode,
     "PreviewImageLimited": PreviewImageLimited,
+    "ImageDelay": ImageDelay,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -30,4 +32,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "CollectKeyedVideosNode": "Unbroken-Controlvideo-Handler",
     "CollectVideosNode": "Unbroken-Video-Batchloader",
     "PreviewImageLimited": "Preview Image (MP Limit)",
+    "ImageDelay": "Async Image Delay (ms)",
 }
