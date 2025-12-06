@@ -5,6 +5,7 @@ import subprocess
 import json
 import numpy as np
 import math
+import torch.nn.functional as F
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,11 +27,12 @@ class KlingVideoHandler(ComfyNodeABC):
             },
             "optional": {
                 "logging_flags": ("STRING", {"default": ""}),
+                "prompts_prefix": ("STRING", {"default": ""}),
             }
         }
 
-    RETURN_TYPES = ("STRING",   "IMAGE", "INT",   "IMAGE",       "STRING")
-    RETURN_NAMES = ("Video-ID", "Video", "fps",   "Styleframes", "Prompt")
+    RETURN_TYPES = ("STRING",   "IMAGE", "FLOAT", "IMAGE",       "STRING", "INT")
+    RETURN_NAMES = ("Video-ID", "Video", "fps",   "Styleframes", "Prompt", "n_frames")
     FUNCTION = "run"
     CATEGORY = "Unbroken"
 
@@ -41,7 +43,8 @@ class KlingVideoHandler(ComfyNodeABC):
             videos_folder: str,
             styleframes_folder: str,
             prompts_folder: str,
-            logging_flags: str = ""
+            logging_flags: str = "",
+            prompts_prefix: str = ""
     ):
         # Setup Settings
         basepath = Path(basepath)
@@ -54,6 +57,7 @@ class KlingVideoHandler(ComfyNodeABC):
         Settings.set_prompts_folder(basepath / prompts_folder)
 
         Settings.set_debug_flags(logging_flags)
+        Settings.set_prompts_prefix(prompts_prefix)
 
         # Setup Provider
         provider = Provider()
@@ -63,8 +67,9 @@ class KlingVideoHandler(ComfyNodeABC):
         fps         = Settings.VIDEO_FPS
         styleframes = provider.load_style_images_at_idx(index)
         prompt      = provider.load_prompt_at_idx(index)
+        n_frames    = provider.load_n_frames_at_idx(index)
 
-        return video_id, video, fps, styleframes, prompt
+        return video_id, video, fps, styleframes, prompt, n_frames
 
 
 class Provider:
@@ -79,6 +84,8 @@ class Provider:
             return
 
     def load_id_at_idx(self,idx: int) -> str:
+        self._assert_idx_valid(idx)
+
         return self._master_df.iloc[idx]["ID"]
 
     def load_video_at_idx(self, idx: int) -> torch.Tensor:
@@ -89,16 +96,6 @@ class Provider:
         video = TorchUtils.load_video_as_tensor(video_path)
 
         video = self._conform_video(video, n_frames)
-
-        return video
-
-    @staticmethod
-    def _conform_video(video: torch.Tensor, n_frames: int) -> torch.Tensor:
-        if n_frames < Settings.VIDEO_MIN_LENGTH_F:
-            video = TorchUtils.ping_pong_extend(video)
-
-        if n_frames > Settings.VIDEO_MAX_LENGTH_F:
-            video = TorchUtils.adaptive_shorten(video)
 
         return video
 
@@ -116,15 +113,27 @@ class Provider:
 
         return torch.stack(frames, dim=0)  # (B,H,W,C)
 
-    def load_prompt_at_idx(self, idx) -> torch.Tensor:
+    def load_prompt_at_idx(self, idx) -> str:
         self._assert_idx_valid(idx)
+        return Settings.PROMPTS_PREFIX + self._master_df.iloc[idx]["prompt"]
 
-        return self._master_df.iloc[idx]["prompt"]
+    def load_n_frames_at_idx(self, idx) -> int:
+        self._assert_idx_valid(idx)
+        return self._master_df.iloc[idx]["n_frames"]
 
+    @staticmethod
+    def _conform_video(video: torch.Tensor, n_frames: int) -> torch.Tensor:
+        if n_frames < Settings.VIDEO_MIN_LENGTH_F:
+            video = TorchUtils.ping_pong_extend(video)
 
+        if n_frames > Settings.VIDEO_MAX_LENGTH_F:
+            video = TorchUtils.adaptive_shorten(video)
+
+        video = TorchUtils.upscale_min_height(video)
+
+        return video
 
     def _assert_idx_valid(self, idx: int) -> bool:
-
         if self._master_df is None:
             raise IndexError(f"{self.cls_name}: Tried to access empty master_df, couldn't continue.")
 
@@ -161,6 +170,7 @@ class MasterLoader:
 
         self.master_df = video_df.merge(imgs_df, on='ID', how='inner')
         self.master_df = self.master_df.merge(prompts_df, on='ID', how='left')
+        self.master_df["prompt"] = self.master_df["prompt"].fillna("")
 
 
 class VideoLoader:
@@ -381,6 +391,9 @@ class Settings:
     VIDEO_FPS = 25
     VIDEO_MIN_LENGTH_F = VIDEO_MIN_LENGTH_S * VIDEO_FPS
     VIDEO_MAX_LENGTH_F = VIDEO_MAX_LENGTH_S * VIDEO_FPS
+    VIDEO_MIN_HEIGHT = 720
+
+    PROMPTS_PREFIX = ""
 
     GET_N_FRAMES_ERROR_RETURN = -1
 
@@ -411,6 +424,13 @@ class Settings:
     def set_debug_flags(cls, flags: str):
         cls.DEBUG_FLAGS_STRING = flags
         cls.DEBUG_FLAGS = cls._parse(flags)
+
+    @classmethod
+    def set_prompts_prefix(cls, prefix: str):
+        if isinstance(prefix, str):
+            cls.PROMPTS_PREFIX = prefix
+        else:
+            Utils.debug_print(f"Could not set prompts prefix to {prefix}")
 
     @staticmethod
     def _parse(flags: str) -> set[str]:
@@ -549,3 +569,30 @@ class TorchUtils:
 
         factor = math.ceil(length / target)
         return video[::factor][:target]
+
+    @staticmethod
+    def upscale_min_height(video: torch.Tensor) -> torch.Tensor:
+        """
+        video: (B,H,W,C) float [0..1]
+        """
+        B, H, W, C = video.shape
+        min_h = Settings.VIDEO_MIN_HEIGHT
+
+        if H >= min_h:
+            return video
+
+        scale = min_h / H
+        new_w = int(W * scale)
+
+        # (B,H,W,C) -> (B,C,H,W)
+        vid = video.permute(0, 3, 1, 2)
+
+        vid = F.interpolate(
+            vid,
+            size=(min_h, new_w),
+            mode="bilinear",
+            align_corners=False
+        )
+
+        # Zurück nach (B,H,W,C)
+        return vid.permute(0, 2, 3, 1).contiguous()
