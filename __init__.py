@@ -7,6 +7,7 @@ from .unbroken_videogen import VideoHandler
 from .unbroken_controlvideos import CollectKeyedVideosNode
 from .preview_image_limited_resolution import PreviewImageLimited
 from .unbroken_video_batch import CollectVideosNode
+from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
 
 NODE_CLASS_MAPPINGS = {
@@ -18,6 +19,7 @@ NODE_CLASS_MAPPINGS = {
     "Unbroken-Video-Handler": VideoHandler,
     "CollectKeyedVideosNode": CollectKeyedVideosNode,
     "CollectVideosNode": CollectVideosNode,
+    "KlingVideoHandler": KlingVideoHandler,
     "PreviewImageLimited": PreviewImageLimited,
     "ImageDelay": ImageDelay,
 }
@@ -31,6 +33,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "VideoHandler": "Unbroken-Video-Handler",
     "CollectKeyedVideosNode": "Unbroken-Controlvideo-Handler",
     "CollectVideosNode": "Unbroken-Video-Batchloader",
+    "KlingVideoHandler": "Unbroken-Kling-Video-Batchloader",
     "PreviewImageLimited": "Preview Image (MP Limit)",
     "ImageDelay": "Async Image Delay (ms)",
 }
