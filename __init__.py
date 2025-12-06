@@ -9,6 +9,7 @@ from .preview_image_limited_resolution import PreviewImageLimited
 from .unbroken_video_batch import CollectVideosNode
 from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
+from .unbroken_workflow_logger import WorkflowLoggerNode
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -22,6 +23,7 @@ NODE_CLASS_MAPPINGS = {
     "KlingVideoHandler": KlingVideoHandler,
     "PreviewImageLimited": PreviewImageLimited,
     "ImageDelay": ImageDelay,
+    "WorkflowLoggerNode": WorkflowLoggerNode,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -36,4 +38,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "KlingVideoHandler": "Unbroken-Kling-Video-Batchloader",
     "PreviewImageLimited": "Preview Image (MP Limit)",
     "ImageDelay": "Async Image Delay (ms)",
+    "WorkflowLoggerNode": "WorkflowLoggerNode",
 }
