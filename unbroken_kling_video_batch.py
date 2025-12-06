@@ -45,11 +45,11 @@ class KlingVideoHandler(ComfyNodeABC):
     ):
         # Setup Settings
         basepath = Path(basepath)
-        controlvideos_folder = Path(videos_folder)
+        videos_folder = Path(videos_folder)
         styleframes_folder = Path(styleframes_folder)
         prompts_folder = Path(prompts_folder)
 
-        Settings.set_video_folder(basepath / controlvideos_folder)
+        Settings.set_video_folder(basepath / videos_folder)
         Settings.set_style_img_folder(basepath / styleframes_folder)
         Settings.set_prompts_folder(basepath / prompts_folder)
 
@@ -67,15 +67,15 @@ class KlingVideoHandler(ComfyNodeABC):
         return video_id, video, fps, styleframes, prompt
 
 
-
-
 class Provider:
     def __init__(self):
         master_loader = MasterLoader()
         self._master_df = master_loader.master_df
 
+        self.cls_name = "Provider"
+
         if self._master_df is None:
-            Utils.debug_print("Got an empty master_df, can't continue.")
+            Utils.debug_print(f"{self.cls_name}: Got an empty master_df, can't continue.")
             return
 
     def load_id_at_idx(self,idx: int) -> str:
@@ -92,6 +92,16 @@ class Provider:
 
         return video
 
+    @staticmethod
+    def _conform_video(video: torch.Tensor, n_frames: int) -> torch.Tensor:
+        if n_frames < Settings.VIDEO_MIN_LENGTH_F:
+            video = TorchUtils.ping_pong_extend(video)
+
+        if n_frames > Settings.VIDEO_MAX_LENGTH_F:
+            video = TorchUtils.adaptive_shorten(video)
+
+        return video
+
     def load_style_images_at_idx(self, idx) -> torch.Tensor:
         self._assert_idx_valid(idx)
 
@@ -100,7 +110,8 @@ class Provider:
 
         for si in style_img_list:
             img = Image.open(si.path).convert("RGB")
-            t = torch.tensor(img, dtype=torch.float32) / 255.0  # (H,W,C)
+            arr = np.array(img, dtype=np.float32)  # (H,W,C)
+            t = torch.from_numpy(arr) / 255.0
             frames.append(t)
 
         return torch.stack(frames, dim=0)  # (B,H,W,C)
@@ -110,24 +121,16 @@ class Provider:
 
         return self._master_df.iloc[idx]["prompt"]
 
-    @staticmethod
-    def _conform_video(video: torch.Tensor, frames: int) -> torch.Tensor:
-        if frames < Settings.VIDEO_MIN_LENGTH_F:
-            video = TorchUtils.ping_pong_extend(video, frames)
 
-        if frames > Settings.VIDEO_MAX_LENGTH_F:
-            video = TorchUtils.adaptive_shorten(video, frames)
-
-        return video
 
     def _assert_idx_valid(self, idx: int) -> bool:
 
         if self._master_df is None:
-            raise IndexError("Tried to access empty master_df, couldn't continue.")
+            raise IndexError(f"{self.cls_name}: Tried to access empty master_df, couldn't continue.")
 
         if idx < 0 or idx >= self._master_df.shape[0]:
             raise IndexError(
-                f"Index {idx} out of range. Valid range: 0..{self._master_df.shape[0] - 1}"
+                f"{self.cls_name}: Index {idx} out of range. Valid range: 0..{self._master_df.shape[0] - 1}"
             )
 
         # Alle Prüfungen bestanden
@@ -136,6 +139,7 @@ class Provider:
 
 class MasterLoader:
     def __init__(self):
+        self.cls_name = "MasterLoader"
         video_manager = VideoLoader()
         imgs_manager = StyleImageLoader()
         prompts_manager = PromptLoader()
@@ -150,8 +154,8 @@ class MasterLoader:
             prompts_df = prompts_manager.prompts_dataframe
 
         except Exception as e:
-            Utils.debug_print("Error when creating individual dataframes.")
-            Utils.debug_print(f"Got Exception: {e}")
+            Utils.debug_print(f"{self.cls_name}: Error when creating individual dataframes.")
+            Utils.debug_print(f"{self.cls_name}: Got Exception: {e}")
             self.master_df = None
             return
 
@@ -162,6 +166,7 @@ class MasterLoader:
 class VideoLoader:
     def __init__ (self):
         self._video_folder = Settings.VIDEO_FOLDER
+        self.cls_name = "VideoLoader"
 
         self.video_dataframe = pd.DataFrame(columns = Settings.REQUIRED_VIDEO_COLS)
 
@@ -170,19 +175,19 @@ class VideoLoader:
             folder = self._video_folder,
             extensions = [".mov", ".mp4"])
 
-        Utils.debug_print("Found video files:", "IO, video_dataframe, debug")
-        Utils.debug_print(f"{files}", "IO, video_dataframe, debug")
+        Utils.debug_print(f"{self.cls_name}: Found video files:", "IO, video_dataframe, debug")
+        Utils.debug_print(f"{self.cls_name}: {files}", "IO, video_dataframe, debug")
 
         for p in files:
             vid_id   = Utils.extract_id_from_string(p.name)
             n_frames = Utils.get_n_frames(p)
 
             if vid_id is None:
-                Utils.debug_print(f"Could not extract video id from file {str(p)}", "IO, video_dataframe")
+                Utils.debug_print(f"{self.cls_name}: Could not extract video id from file {str(p)}", "IO, video_dataframe")
                 continue
 
             if not n_frames > 0:
-                Utils.debug_print(f"Could not read frame count for: {str(p)}", "IO, video_dataframe")
+                Utils.debug_print(f"{self.cls_name}: Could not read frame count for: {str(p)}", "IO, video_dataframe")
                 continue
 
 
@@ -194,7 +199,7 @@ class VideoLoader:
 
         self._consolidate_video_dataframe()
 
-        Utils.debug_print("Generated video-dataframe:", "IO, video_dataframe")
+        Utils.debug_print(f"{self.cls_name}: Generated video-dataframe:", "IO, video_dataframe")
         Utils.debug_print(f"{self.video_dataframe}", "IO, video_dataframe")
 
     def _consolidate_video_dataframe(self):
@@ -204,6 +209,7 @@ class VideoLoader:
 class StyleImageLoader:
     def __init__(self):
         self._images_folder = Settings.IMGS_FOLDER
+        self.cls_name = "StyleImageLoader"
 
         self.images_dataframe = pd.DataFrame(columns=Settings.REQUIRED_IMAGE_COLS)
 
@@ -213,7 +219,7 @@ class StyleImageLoader:
             folder=self._images_folder,
             extensions=[".jpeg", ".jpg", ".png"])
 
-        Utils.debug_print("Found style images:", "IO, images_dataframe, debug")
+        Utils.debug_print(f"{self.cls_name}: Found style images:", "IO, images_dataframe, debug")
         Utils.debug_print(f"{files}", "IO, images_dataframe, debug")
 
         for p in files:
@@ -221,11 +227,11 @@ class StyleImageLoader:
             frame_no = Utils.extract_frame_no_from_string(p.name)
 
             if img_id is None:
-                Utils.debug_print(f"Could not extract image id from file {str(p)}", "IO, images_dataframe")
+                Utils.debug_print(f"{self.cls_name}: Could not extract image id from file {str(p)}", "IO, images_dataframe")
                 continue
 
             if frame_no is None:
-                Utils.debug_print(f"No frame number tag _fxx_ in: {str(p)}", "IO, images_dataframe")
+                Utils.debug_print(f"{self.cls_name}: No frame number tag _fxx_ in: {str(p)}", "IO, images_dataframe")
                 continue
 
             self.images_dataframe.loc[len(self.images_dataframe)] = {
@@ -233,9 +239,12 @@ class StyleImageLoader:
                 "style_img_list": [Utils.StyleImage(Path(p), int(frame_no))]
             }
 
+        Utils.debug_print(f"{self.cls_name}: Style-image-dataframe before consolidation:", "IO, images_dataframe, debug")
+        Utils.debug_print(f"{self.images_dataframe}", "IO, images_dataframe, debug")
+
         self._consolidate_images_dataframe()
 
-        Utils.debug_print("Generated style-image-dataframe:", "IO, images_dataframe")
+        Utils.debug_print(f"{self.cls_name}: Generated style-image-dataframe:", "IO, images_dataframe")
         Utils.debug_print(f"{self.images_dataframe}", "IO, images_dataframe")
 
 
@@ -246,24 +255,21 @@ class StyleImageLoader:
             seen = set()
             result = []
 
-            for item in rows:
-                # item kann entweder [path, frame] sein oder bereits ein StyleImage
-                if isinstance(item, Utils.StyleImage):
-                    path, frame = item.path, item.frame
-                else:
-                    path, frame = item  # klassische Liste [p, f]
+            for item in rows:  # item ist die Liste aus StyleImages
 
-                if frame not in seen:
-                    seen.add(frame)
-                    result.append(Utils.StyleImage(path=path, frame=frame))
+                for style_img in item:  # style_img ist ein einzelnes Utils.StyleImage
+                    path, frame_no = style_img.path, style_img.frame_no
 
-            # optional Sortierung nach frame_no, damit downstream deterministisch bleibt
-            result.sort(key=lambda x: x.frame)
+                    if frame_no not in seen:
+                        seen.add(frame_no)
+                        result.append(Utils.StyleImage(path=path, frame_no=frame_no))
+
+            result.sort(key=lambda x: x.frame_no)
             return result
 
         self.images_dataframe = (
             df.groupby("ID")
-            .agg(style_imgs=("style_img_list", merge))
+            .agg(style_img_list=("style_img_list", merge))
             .reset_index()
         )
 
@@ -275,6 +281,7 @@ class PromptLoader:
         self._optional_cols = Settings.OPTIONAL_PROMPT_COLS
         self._prompts_cols = self._required_cols + self._optional_cols
 
+        self.cls_name = "PromptLoader"
         self.prompts_dataframe = pd.DataFrame(columns=self._prompts_cols)
 
 
@@ -283,21 +290,21 @@ class PromptLoader:
             folder=self._prompts_folder,
             extensions=[".csv"])
 
-        Utils.debug_print("Found prompt tables:", "IO, prompts_dataframe, debug")
+        Utils.debug_print(f"{self.cls_name}: Found prompt tables:", "IO, prompts_dataframe, debug")
         Utils.debug_print(f"{files}", "IO, prompts_dataframe, debug")
 
         for p in files:
             current_df =  pd.read_csv(p)
             current_df = self._filter_csv(current_df)
             if current_df is None:
-                Utils.debug_print(f"Could not read file {p}", "IO, prompts_dataframe")
+                Utils.debug_print(f"{self.cls_name}: Could not read file {p}", "IO, prompts_dataframe")
                 continue
 
             self.prompts_dataframe = pd.concat([self.prompts_dataframe,current_df], axis=0)
 
         self._consolidate_prompts_dataframe()
 
-        Utils.debug_print("Generated prompts-dataframe:", "IO, prompts_dataframe")
+        Utils.debug_print(f"{self.cls_name}:Generated prompts-dataframe:", "IO, prompts_dataframe")
         Utils.debug_print(f"{self.prompts_dataframe}", "IO, prompts_dataframe")
 
 
@@ -381,15 +388,24 @@ class Settings:
 
     @classmethod
     def set_video_folder(cls, folder: Path):
-        cls.VIDEO_FOLDER = Path(folder).expanduser().resolve()
+        if folder.is_dir():
+            cls.VIDEO_FOLDER = Path(folder).expanduser().resolve()
+        else:
+            Utils.debug_print(f"Could not set video folder to {folder}")
 
     @classmethod
     def set_style_img_folder(cls, folder: Path):
-        cls.IMGS_FOLDER = Path(folder).expanduser().resolve()
+        if folder.is_dir():
+            cls.IMGS_FOLDER = Path(folder).expanduser().resolve()
+        else:
+            Utils.debug_print(f"Could not set images folder to {folder}")
 
     @classmethod
     def set_prompts_folder(cls, folder: Path):
-        cls.PROMPTS_FOLDER = Path(folder).expanduser().resolve()
+        if folder.is_dir():
+            cls.PROMPTS_FOLDER = Path(folder).expanduser().resolve()
+        else:
+            Utils.debug_print(f"Could not set prompts folder to {folder}")
 
     @classmethod
     def set_debug_flags(cls, flags: str):
@@ -450,7 +466,7 @@ class Utils:
     @dataclass(frozen=True)
     class StyleImage:
         path: Path
-        frame: int
+        frame_no: int
 
 
 class TorchUtils:
@@ -495,7 +511,7 @@ class TorchUtils:
             if not raw or len(raw) < frame_size:
                 break
 
-            frame = np.frombuffer(raw, np.uint8).reshape(h, w, 3)
+            frame = np.frombuffer(raw, np.uint8).reshape(h, w, 3).copy()
             tensor = torch.from_numpy(frame).float() / 255.0
             frames.append(tensor)
 
@@ -508,9 +524,10 @@ class TorchUtils:
         return torch.stack(frames, dim=0)  # (B,H,W,C)
 
     @staticmethod
-    def ping_pong_extend(video: torch.Tensor, target: int) -> torch.Tensor:
+    def ping_pong_extend(video: torch.Tensor) -> torch.Tensor:
         frames = [video]
         forward = True
+        target = Settings.VIDEO_MIN_LENGTH_F
 
         while sum(v.shape[0] for v in frames) < target:
             if forward:
@@ -523,13 +540,12 @@ class TorchUtils:
         return out[:target]  # sauber abschneiden, falls Überhang
 
     @staticmethod
-    def adaptive_shorten(video: torch.Tensor, target: int) -> torch.Tensor:
+    def adaptive_shorten(video: torch.Tensor) -> torch.Tensor:
         length = video.shape[0]
+        target = Settings.VIDEO_MAX_LENGTH_F
+
         if length <= target:
             return video
 
         factor = math.ceil(length / target)
         return video[::factor][:target]
-
-
-
