@@ -26,8 +26,9 @@ class KlingVideoHandler(ComfyNodeABC):
                 "prompts_folder": ("STRING", {"default": ""}),
             },
             "optional": {
-                "logging_flags": ("STRING", {"default": ""}),
+                "fileID_regex": ("STRING", {"default": r"(\d_\d\d_\d\d[A-Za-z]?)"}),
                 "prompts_prefix": ("STRING", {"default": ""}),
+                "logging_flags": ("STRING", {"default": ""}),
             }
         }
 
@@ -43,8 +44,9 @@ class KlingVideoHandler(ComfyNodeABC):
             videos_folder: str,
             styleframes_folder: str,
             prompts_folder: str,
+            fileid_regex: str = "\d_\d\d_\d\d[A-Za-z]?",
+            prompts_prefix: str = "",
             logging_flags: str = "",
-            prompts_prefix: str = ""
     ):
         # Setup Settings
         basepath = Path(basepath)
@@ -56,8 +58,9 @@ class KlingVideoHandler(ComfyNodeABC):
         Settings.set_style_img_folder(basepath / styleframes_folder)
         Settings.set_prompts_folder(basepath / prompts_folder)
 
-        Settings.set_debug_flags(logging_flags)
+        Settings.set_filename_regex(fileid_regex)
         Settings.set_prompts_prefix(prompts_prefix)
+        Settings.set_debug_flags(logging_flags)
 
         # Setup Provider
         provider = Provider()
@@ -373,7 +376,7 @@ class Settings:
     DEBUG_FLAGS = set()
     POSS_DEBUG_FLAGS = "IO, video_dataframe, images_dataframe, prompts_dataframe, utils,"
 
-    FILENAME_REGEX = re.compile(r"(\d_\d\d_\d\d[A-Za-z]?)")
+    FILE_ID_REGEX = None
     FRAME_NO_REGEX = re.compile(r"_f(\d+)_")
 
     VIDEO_FOLDER = None
@@ -432,6 +435,13 @@ class Settings:
         else:
             Utils.debug_print(f"Could not set prompts prefix to {prefix}")
 
+    @classmethod
+    def set_filename_regex(cls, regex: str):
+        if isinstance(regex, str):
+            cls.FILE_ID_REGEX = re.compile(regex)
+        else:
+            Utils.debug_print(f"Could not set regex to {regex}")
+
     @staticmethod
     def _parse(flags: str) -> set[str]:
         return {f.strip() for f in flags.split(",") if f.strip()}
@@ -441,7 +451,11 @@ class Utils:
 
     @staticmethod
     def extract_id_from_string(string: str) -> str:
-        match = Settings.FILENAME_REGEX.match(string)
+        if Settings.FILE_ID_REGEX is None:
+            Utils.debug_print("No Regex provided for File-ID")
+            return "FAULTY_REGEX_PARSER"
+
+        match = Settings.FILE_ID_REGEX.match(string)
         return match.group(1) if match else None
 
     @staticmethod
