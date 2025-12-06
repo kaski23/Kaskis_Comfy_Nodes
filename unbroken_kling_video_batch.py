@@ -26,7 +26,7 @@ class KlingVideoHandler(ComfyNodeABC):
                 "prompts_folder": ("STRING", {"default": ""}),
             },
             "optional": {
-                "fileID_regex": ("STRING", {"default": r"(\d_\d\d_\d\d[A-Za-z]?)"}),
+                "fileid_regex": ("STRING", {"default": r"(\d_\d\d_\d\d[A-Za-z]?)"}),
                 "prompts_prefix": ("STRING", {"default": ""}),
                 "logging_flags": ("STRING", {"default": ""}),
             }
