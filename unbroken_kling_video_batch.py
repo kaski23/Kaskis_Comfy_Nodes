@@ -107,11 +107,20 @@ class Provider:
 
         style_img_list = self._master_df.iloc[idx]["style_img_list"]
         frames = []
+        width = 0
+        height = 0
 
         for si in style_img_list:
             img = Image.open(si.path).convert("RGB")
             arr = np.array(img, dtype=np.float32)  # (H,W,C)
             t = torch.from_numpy(arr) / 255.0
+            h, w, _ =t.shape
+            
+            if width == 0 and height == 0:
+                width, height = w, h
+            else:
+                t = TorchUtils.resize_and_pad(t, width, height)
+            
             frames.append(t)
 
         return torch.stack(frames, dim=0)  # (B,H,W,C)
@@ -132,7 +141,7 @@ class Provider:
         if n_frames > Settings.VIDEO_MAX_LENGTH_F:
             video = TorchUtils.adaptive_shorten(video)
 
-        video = TorchUtils.upscale_min_height(video)
+        video = TorchUtils.upscale_min_size(video)
 
         return video
 
@@ -394,6 +403,7 @@ class Settings:
     VIDEO_FPS = 25
     VIDEO_MIN_LENGTH_F = VIDEO_MIN_LENGTH_S * VIDEO_FPS
     VIDEO_MAX_LENGTH_F = VIDEO_MAX_LENGTH_S * VIDEO_FPS
+    VIDEO_MIN_WIDTH  = 720
     VIDEO_MIN_HEIGHT = 720
 
     PROMPTS_PREFIX = ""
@@ -585,28 +595,90 @@ class TorchUtils:
         return video[::factor][:target]
 
     @staticmethod
-    def upscale_min_height(video: torch.Tensor) -> torch.Tensor:
+    def upscale_min_size(video: torch.Tensor) -> torch.Tensor:
         """
         video: (B,H,W,C) float [0..1]
         """
         B, H, W, C = video.shape
         min_h = Settings.VIDEO_MIN_HEIGHT
+        min_w = Settings.VIDEO_MIN_WIDTH
 
-        if H >= min_h:
+        # falls bereits groß genug -> nichts tun
+        if H >= min_h and W >= min_w:
             return video
 
-        scale = min_h / H
-        new_w = int(W * scale)
+        # benötigte Skalierungen für Höhe und Breite
+        scale_h = min_h / H
+        scale_w = min_w / W
+
+        # Wähle den größeren Faktor (verhindert Untererfüllung)
+        scale = max(scale_h, scale_w)
+
+        new_h = int(round(H * scale))
+        new_w = int(round(W * scale))
 
         # (B,H,W,C) -> (B,C,H,W)
         vid = video.permute(0, 3, 1, 2)
 
         vid = F.interpolate(
             vid,
-            size=(min_h, new_w),
+            size=(new_h, new_w),
             mode="bilinear",
             align_corners=False
         )
 
-        # Zurück nach (B,H,W,C)
         return vid.permute(0, 2, 3, 1).contiguous()
+
+    @staticmethod
+    def resize_and_pad(images: torch.Tensor, target_width: int, target_height: int) -> torch.Tensor:
+        """
+        Accepts:
+            - [F, H, W, C]
+            - [H, W, C]   (single frame)
+
+        Returns:
+            - Same format as input, padded/scaled to (target_height, target_width)
+        """
+        # ---- unify dimensionality ----
+        single = False
+        if images.ndim == 3:  # [H, W, C]
+            images = images.unsqueeze(0)  # -> [1, H, W, C]
+            single = True
+
+        if images.ndim != 4:
+            raise ValueError(f"Expected [F,H,W,C] or [H,W,C], got {images.shape}")
+
+        F_, H, W, C = images.shape
+
+        # move to [F,C,H,W]
+        images = images.permute(0, 3, 1, 2)
+
+        # compute scaling
+        scale_w = target_width / W
+        scale_h = target_height / H
+        scale = min(scale_w, scale_h)
+        new_W = max(1, int(round(W * scale)))
+        new_H = max(1, int(round(H * scale)))
+
+        if (new_H, new_W) != (H, W):
+            images = F.interpolate(images, size=(new_H, new_W), mode="bilinear", align_corners=False)
+
+        # mean background
+        mean_color = images.mean(dim=(0, 2, 3), keepdim=True)  # [1,C,1,1]
+
+        # allocate output
+        out = mean_color.expand(F_, C, target_height, target_width).clone()
+
+        # center paste
+        pad_left = (target_width  - new_W) // 2
+        pad_top  = (target_height - new_H) // 2
+        out[:, :, pad_top:pad_top+new_H, pad_left:pad_left+new_W] = images
+
+        # back to [F,H,W,C]
+        out = out.permute(0, 2, 3, 1)
+
+        # if input was single image → remove dummy batch
+        if single:
+            out = out.squeeze(0)
+
+        return out
