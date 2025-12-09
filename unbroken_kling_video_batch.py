@@ -587,15 +587,16 @@ class TorchUtils:
         return out[:target]  # sauber abschneiden, falls Überhang
 
     @staticmethod
-    def adaptive_shorten(video: torch.Tensor) -> torch.Tensor:
+    def _adaptive_shorten(self, video: torch.Tensor, target: int) -> torch.Tensor:
         length = video.shape[0]
-        target = Settings.VIDEO_MAX_LENGTH_F
-
         if length <= target:
             return video
 
-        factor = math.ceil(length / target)
-        return video[::factor][:target]
+        # linspace über Indizes
+        indices = torch.linspace(0, length - 1, target)
+        indices = indices.long()
+
+        return video[indices]
 
     @staticmethod
     def upscale_min_size(video: torch.Tensor) -> torch.Tensor:
