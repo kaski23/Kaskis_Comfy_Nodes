@@ -10,7 +10,7 @@ from .unbroken_video_batch import CollectVideosNode
 from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
 from .unbroken_workflow_logger import WorkflowLoggerNode#
-from .kling_video_input_sanitize import VideoSanitizer
+from .video_input_sanitize import VideoSanitizer
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,

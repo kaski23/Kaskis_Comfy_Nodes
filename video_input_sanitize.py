@@ -6,22 +6,18 @@ from comfy.comfy_types import ComfyNodeABC
 
 class VideoSanitizer(ComfyNodeABC):
 
-    # -------------------------------------------------------------
-    # Node Interface
-    # -------------------------------------------------------------
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
                 "video": ("IMAGE", {}),   # (B,H,W,C)
-                "min_length": ("INT", {"default": 25, "min": 1, "max": 99999}),
-                "max_length": ("INT", {"default": 250, "min": 1, "max": 99999}),
+                "min_length": ("INT", {"default": 25, "min": 0, "max": 99999}),
+                "max_length": ("INT", {"default": 250, "min": 0, "max": 99999}),
 
-                # size constraints
-                "min_width":  ("INT", {"default": 720, "min": 1, "max": 8192}),
-                "min_height": ("INT", {"default": 720, "min": 1, "max": 8192}),
-                "max_width":  ("INT", {"default": 1920, "min": 1, "max": 8192}),
-                "max_height": ("INT", {"default": 1920, "min": 1, "max": 8192}),
+                "min_width":  ("INT", {"default": 720, "min": 0, "max": 8192}),
+                "min_height": ("INT", {"default": 720, "min": 0, "max": 8192}),
+                "max_width":  ("INT", {"default": 1920, "min": 0, "max": 8192}),
+                "max_height": ("INT", {"default": 1920, "min": 0, "max": 8192}),
             }
         }
 
@@ -40,21 +36,47 @@ class VideoSanitizer(ComfyNodeABC):
         min_width: int, min_height: int,
         max_width: int, max_height: int
     ):
-
+        # -----------------------------------------------------------
         frames = video
-        n = frames.shape[0]
+        n, h, w, _ = frames.shape
+        
+        if min_length < max_length:
+            # --- Extend ---
+            if n < min_length:
+                frames = self._ping_pong_extend(frames, target=min_length)
+                n = frames.shape[0]
 
-        # Extend if too short
-        if n < min_length:
-            frames = self._ping_pong_extend(frames, target=min_length)
-            n = frames.shape[0]
+            # --- Shorten ---
+            if n > max_length:
+                frames = self._adaptive_shorten(frames, target=max_length)
+                n = frames.shape[0]
+        elif min_length >= max_length and max_length != 0:
+            raise ValueError ("min_length >= max_length")
+        
+        
+        # -----------------------------------------------------------
+        #width-check
+        if min_width + max_width == 0:
+            min_width, max_width = w, w
+            
+        elif min_width > 0 and max_width == 0:
+            max_width = 999999999   
+            
+        elif min_width >= max_width:
+            raise ValueError ("min_width >= max_width")
+        
+        #height-check
+        if min_height + max_height == 0:
+            min_height, max_height = h, h
+            
+        elif min_height > 0 and max_height == 0:
+            max_height = 999999999   
+            
+        elif min_height >= max_height:
+            raise ValueError ("min_height >= max_height")
 
-        # Shorten if too long
-        if n > max_length:
-            frames = self._adaptive_shorten(frames, target=max_length)
-            n = frames.shape[0]
-
-        # Min/Max Resize
+        # --- Resize ---
+       
         frames = self._resize_to_constraints(
             frames,
             min_width=min_width,  min_height=min_height,
@@ -87,10 +109,8 @@ class VideoSanitizer(ComfyNodeABC):
         if length <= target:
             return video
 
-        # linspace über Indizes
-        indices = torch.linspace(0, length - 1, target)
-        indices = indices.long()
-
+        # Gleichverteilte Indizes – perfekte Sample-Verteilung
+        indices = torch.linspace(0, length - 1, target).long()
         return video[indices]
 
 
@@ -100,10 +120,6 @@ class VideoSanitizer(ComfyNodeABC):
         min_width: int, min_height: int,
         max_width: int, max_height: int,
     ) -> torch.Tensor:
-
-        """
-        video: (B,H,W,C)
-        """
 
         B, H, W, C = video.shape
 
@@ -122,17 +138,15 @@ class VideoSanitizer(ComfyNodeABC):
         if W > max_width:
             scale_down = min(scale_down, max_width / W)
 
-        # Effektiver Skalierungsfaktor
         scale = scale_up * scale_down
 
-        # Keine Größenänderung nötig
         if scale == 1.0:
             return video
 
         new_h = int(round(H * scale))
         new_w = int(round(W * scale))
 
-        vid = video.permute(0, 3, 1, 2)  # (B,H,W,C) → (B,C,H,W)
+        vid = video.permute(0, 3, 1, 2)
 
         vid = F.interpolate(
             vid,
