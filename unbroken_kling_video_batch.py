@@ -48,6 +48,7 @@ class KlingVideoHandler(ComfyNodeABC):
             prompts_prefix: str = "",
             logging_flags: str = "",
     ):
+
         # Setup Settings
         basepath = Path(basepath)
         videos_folder = Path(videos_folder)
@@ -71,6 +72,8 @@ class KlingVideoHandler(ComfyNodeABC):
         styleframes = provider.load_style_images_at_idx(index)
         prompt      = provider.load_prompt_at_idx(index)
         n_frames    = provider.load_n_frames_at_idx(index)
+            
+
 
         return video_id, video, fps, styleframes, prompt, n_frames
 

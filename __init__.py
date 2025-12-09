@@ -2,14 +2,15 @@ from .load_image_with_filename import LoadImageWithFilename
 from .load_video_with_filename import LoadVideoWithFilename
 from .string_split_select import StringSplitSelect
 from .switch import PairSwitchNode
-from .converter import IntToString
+from .converter import IntToString, AudioResampler
 from .unbroken_videogen import VideoHandler
 from .unbroken_controlvideos import CollectKeyedVideosNode
 from .preview_image_limited_resolution import PreviewImageLimited
 from .unbroken_video_batch import CollectVideosNode
 from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
-from .unbroken_workflow_logger import WorkflowLoggerNode
+from .unbroken_workflow_logger import WorkflowLoggerNode#
+from .kling_video_input_sanitize import VideoSanitizer
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -24,6 +25,8 @@ NODE_CLASS_MAPPINGS = {
     "PreviewImageLimited": PreviewImageLimited,
     "ImageDelay": ImageDelay,
     "WorkflowLoggerNode": WorkflowLoggerNode,
+    "AudioResampler": AudioResampler,
+    "VideoSanitizer": VideoSanitizer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -39,4 +42,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "PreviewImageLimited": "Preview Image (MP Limit)",
     "ImageDelay": "Async Image Delay (ms)",
     "WorkflowLoggerNode": "WorkflowLoggerNode",
+    "AudioResampler": "Audio Resampler",
+    "VideoSanitizer": "Video Sanitizer",
 }
