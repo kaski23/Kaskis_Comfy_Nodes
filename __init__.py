@@ -10,7 +10,7 @@ from .unbroken_video_batch import CollectVideosNode
 from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
 from .unbroken_workflow_logger import WorkflowLoggerNode#
-from .video_input_sanitize import VideoSanitizer
+from .input_conformer import ConformVideo, ConformAudio, ExtendVideoNearestFrame
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -26,7 +26,9 @@ NODE_CLASS_MAPPINGS = {
     "ImageDelay": ImageDelay,
     "WorkflowLoggerNode": WorkflowLoggerNode,
     "AudioResampler": AudioResampler,
-    "VideoSanitizer": VideoSanitizer,
+    "ConformVideo": ConformVideo,
+    "ConformAudio": ConformAudio,
+    "ExtendVideoNearestFrame": ExtendVideoNearestFrame,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -43,5 +45,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ImageDelay": "Async Image Delay (ms)",
     "WorkflowLoggerNode": "WorkflowLoggerNode",
     "AudioResampler": "Audio Resampler",
-    "VideoSanitizer": "Video Sanitizer",
+    "ConformVideo": "Conform Video",
+    "ConformAudio": "Conform Audio",
+    "ExtendVideoNearestFrame": "Extend Video (Nearest Frame)",
 }

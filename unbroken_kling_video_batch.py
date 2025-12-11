@@ -24,6 +24,7 @@ class KlingVideoHandler(ComfyNodeABC):
                 "videos_folder": ("STRING", {"default": ""}),
                 "styleframes_folder": ("STRING", {"default": ""}),
                 "prompts_folder": ("STRING", {"default": ""}),
+                "conform_video_to_o1": ("BOOLEAN", {"default": False}),
             },
             "optional": {
                 "fileid_regex": ("STRING", {"default": r"(\d_\d\d_\d\d[A-Za-z]?)"}),
@@ -44,6 +45,7 @@ class KlingVideoHandler(ComfyNodeABC):
             videos_folder: str,
             styleframes_folder: str,
             prompts_folder: str,
+            conform_video_to_o1: bool,
             fileid_regex: str = "\d_\d\d_\d\d[A-Za-z]?",
             prompts_prefix: str = "",
             logging_flags: str = "",
@@ -62,6 +64,8 @@ class KlingVideoHandler(ComfyNodeABC):
         Settings.set_filename_regex(fileid_regex)
         Settings.set_prompts_prefix(prompts_prefix)
         Settings.set_debug_flags(logging_flags)
+        
+        Settings.CONFORM_VIDEO = conform_video_to_o1
 
         # Setup Provider
         provider = Provider()
@@ -72,7 +76,6 @@ class KlingVideoHandler(ComfyNodeABC):
         styleframes = provider.load_style_images_at_idx(index)
         prompt      = provider.load_prompt_at_idx(index)
         n_frames    = provider.load_n_frames_at_idx(index)
-            
 
 
         return video_id, video, fps, styleframes, prompt, n_frames
@@ -101,7 +104,7 @@ class Provider:
         n_frames = self._master_df.iloc[idx]["n_frames"]
         video = TorchUtils.load_video_as_tensor(video_path)
 
-        video = self._conform_video(video, n_frames)
+        if Settings.CONFORM_VIDEO: video = self._conform_video(video, n_frames)
 
         return video
 
@@ -130,7 +133,7 @@ class Provider:
 
     def load_prompt_at_idx(self, idx) -> str:
         self._assert_idx_valid(idx)
-        return Settings.PROMPTS_PREFIX + self._master_df.iloc[idx]["prompt"]
+        return Settings.PROMPTS_PREFIX + self._master_df.iloc[idx]["PROMPT"]
 
     def load_n_frames_at_idx(self, idx) -> int:
         self._assert_idx_valid(idx)
@@ -185,7 +188,7 @@ class MasterLoader:
 
         self.master_df = video_df.merge(imgs_df, on='ID', how='inner')
         self.master_df = self.master_df.merge(prompts_df, on='ID', how='left')
-        self.master_df["prompt"] = self.master_df["prompt"].fillna("")
+        self.master_df["PROMPT"] = self.master_df["PROMPT"].fillna("")
 
 
 class VideoLoader:
@@ -320,12 +323,20 @@ class PromptLoader:
 
         for p in files:
             current_df =  pd.read_csv(p)
-            current_df = self._filter_csv(current_df)
             if current_df is None:
                 Utils.debug_print(f"{self.cls_name}: Could not read file {p}", "IO, prompts_dataframe")
                 continue
+            
+            df.columns = df.columns.str.upper()
+            current_df = self._filter_csv(current_df)
+            if current_df is None:
+                Utils.debug_print(f"{self.cls_name}: No valid columns left after filtering in file {p}", "IO, prompts_dataframe")
+                continue
 
+            
+            
             self.prompts_dataframe = pd.concat([self.prompts_dataframe,current_df], axis=0)
+            
 
         self._consolidate_prompts_dataframe()
 
@@ -372,7 +383,7 @@ class PromptLoader:
         # Schritt 2: Alle Prompt-Spalten zusammenführen → eine Spalte "Prompts"
         prompt_cols = [c for c in self._prompts_cols if c != "ID"]
 
-        df["prompt"] = (
+        df["PROMPT"] = (
             df[prompt_cols]
             .apply(lambda row: " ".join([x for x in row if x]), axis=1)
         )
@@ -398,8 +409,8 @@ class Settings:
     ID_COLUMN            = ["ID"]
     REQUIRED_VIDEO_COLS  = ID_COLUMN + ["video_path", "n_frames"]
     REQUIRED_IMAGE_COLS  = ID_COLUMN + ["style_img_list"]
-    REQUIRED_PROMPT_COLS = ID_COLUMN + ["prompt"]
-    OPTIONAL_PROMPT_COLS = ["prompt1", "prompt2", "prompt3"]
+    REQUIRED_PROMPT_COLS = ID_COLUMN + ["PROMPT"]
+    OPTIONAL_PROMPT_COLS = ["PROMPT1", "PROMPT2", "PROMPT3"]
 
     VIDEO_MIN_LENGTH_S = 3
     VIDEO_MAX_LENGTH_S = 10
@@ -410,6 +421,8 @@ class Settings:
     VIDEO_MIN_HEIGHT = 720
 
     PROMPTS_PREFIX = ""
+    
+    CONFORM_VIDEO = False
 
     GET_N_FRAMES_ERROR_RETURN = -1
 

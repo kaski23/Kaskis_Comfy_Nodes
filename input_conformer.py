@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from comfy.comfy_types import ComfyNodeABC
 
 
-class VideoSanitizer(ComfyNodeABC):
+class ConformVideo(ComfyNodeABC):
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -40,19 +40,24 @@ class VideoSanitizer(ComfyNodeABC):
         frames = video
         n, h, w, _ = frames.shape
         
-        if min_length < max_length:
-            # --- Extend ---
-            if n < min_length:
-                frames = self._ping_pong_extend(frames, target=min_length)
-                n = frames.shape[0]
-
-            # --- Shorten ---
-            if n > max_length:
-                frames = self._adaptive_shorten(frames, target=max_length)
-                n = frames.shape[0]
-        elif min_length >= max_length and max_length != 0:
-            raise ValueError ("min_length >= max_length")
+        if min_length + max_length == 0:
+            min_length, max_length = n, n
+            
+        elif min_length > 0 and max_length == 0:
+            max_length = 999999999
         
+        elif min_length >= max_length:
+            raise ValueError ("min_length >= max_length")
+            
+        # --- Extend ---
+        if n < min_length:
+            frames = self._ping_pong_extend(frames, target=min_length)
+            n = frames.shape[0]
+
+        # --- Shorten ---
+        if n > max_length:
+            frames = self._adaptive_shorten(frames, target=max_length)
+            n = frames.shape[0]
         
         # -----------------------------------------------------------
         #width-check
@@ -156,3 +161,106 @@ class VideoSanitizer(ComfyNodeABC):
         )
 
         return vid.permute(0, 2, 3, 1).contiguous()
+
+
+
+class ConformAudio(ComfyNodeABC):
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "audio": ("AUDIO", {}),
+                "min_seconds": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100000.0}),
+                "max_seconds": ("FLOAT", {"default": 10.0, "min": 0.0, "max": 100000.0}),
+            }
+        }
+
+    RETURN_TYPES = ("AUDIO",)
+    FUNCTION = "conform"
+    CATEGORY = "Audio/Processing"
+
+
+    # -------------------------------------------------------------
+    # Main function
+    # -------------------------------------------------------------
+    def conform(self, audio, min_seconds: float, max_seconds: float):
+        waveform = audio["waveform"]   # (B, C, S)
+        sample_rate = audio["sample_rate"]
+
+        B, C, S = waveform.shape
+
+        # Umrechnen der Sekunden in Samples
+        min_length = int(round(min_seconds * sample_rate)) if min_seconds > 0 else 0
+        max_length = int(round(max_seconds * sample_rate)) if max_seconds > 0 else 0
+
+
+        if min_length + max_length == 0:
+            min_length, max_length = B, B
+            
+        elif min_length > 0 and max_length == 0:
+            max_length = 999999999
+        
+        elif min_length >= max_length:
+            raise ValueError ("min_length >= max_length")
+
+
+        # ---------------------------------------------------------
+        # EXTEND WITH SILENCE
+        # ---------------------------------------------------------
+        if S < min_length:
+            pad_amount = min_length - S
+            silence = torch.zeros((B, C, pad_amount), dtype=waveform.dtype, device=waveform.device)
+            waveform = torch.cat([waveform, silence], dim=2)
+            _, _, S = waveform.shape
+
+        # ---------------------------------------------------------
+        # SHORTEN (evenly spaced sampling)
+        # ---------------------------------------------------------
+        if S > max_length:
+            indices = torch.linspace(0, S - 1, max_length).long().to(waveform.device)
+            waveform = waveform[:, :, indices]
+
+        return ({
+            "waveform": waveform,
+            "sample_rate": sample_rate
+        },)
+
+
+
+class ExtendVideoNearestFrame(ComfyNodeABC):
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "video": ("IMAGE", {}),          # (B,H,W,C)
+                "target_length": ("INT", {"default": 200, "min": 1, "max": 999999}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "extend"
+    CATEGORY = "Video/Processing"
+
+
+    # -------------------------------------------------------------
+    # Main function
+    # -------------------------------------------------------------
+    def extend(self, video: torch.Tensor, target_length: int):
+
+        src_len = video.shape[0]
+
+        # Wenn schon lang genug → nicht ändern
+        if src_len >= target_length:
+            return (video,)
+
+        # Gleichmäßig verteilte Duplikate erzeugen
+        indices = torch.linspace(
+            0, src_len - 1, target_length,
+            device=video.device
+        ).long()
+
+        extended = video[indices]
+
+        return (extended,)
