@@ -327,7 +327,7 @@ class PromptLoader:
                 Utils.debug_print(f"{self.cls_name}: Could not read file {p}", "IO, prompts_dataframe")
                 continue
             
-            df.columns = current_df.columns.str.upper()
+            current_df.columns = current_df.columns.str.upper()
             current_df = self._filter_csv(current_df)
             if current_df is None:
                 Utils.debug_print(f"{self.cls_name}: No valid columns left after filtering in file {p}", "IO, prompts_dataframe")
