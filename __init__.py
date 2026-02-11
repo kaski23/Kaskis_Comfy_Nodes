@@ -9,8 +9,8 @@ from .preview_image_limited_resolution import PreviewImageLimited
 from .unbroken_video_batch import CollectVideosNode
 from .unbroken_kling_video_batch import KlingVideoHandler
 from .async_delay import ImageDelay
-from .unbroken_workflow_logger import WorkflowLoggerNode#
-from .input_conformer import ConformVideo, ConformAudio, ExtendVideoNearestFrame
+from .unbroken_workflow_logger import WorkflowLoggerNode
+from .input_conformer import ConformVideo, ConformAudio, ResampleVideoNearest
 
 NODE_CLASS_MAPPINGS = {
     "LoadImageWithFilename": LoadImageWithFilename,
@@ -28,7 +28,7 @@ NODE_CLASS_MAPPINGS = {
     "AudioResampler": AudioResampler,
     "ConformVideo": ConformVideo,
     "ConformAudio": ConformAudio,
-    "ExtendVideoNearestFrame": ExtendVideoNearestFrame,
+    "ResampleVideoNearest": ResampleVideoNearest,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -47,5 +47,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "AudioResampler": "Audio Resampler",
     "ConformVideo": "Conform Video",
     "ConformAudio": "Conform Audio",
-    "ExtendVideoNearestFrame": "Extend Video (Nearest Frame)",
+    "ResampleVideoNearest": "Resample Video to length(Nearest Frame)",
 }

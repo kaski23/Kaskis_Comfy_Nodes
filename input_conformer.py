@@ -228,7 +228,7 @@ class ConformAudio(ComfyNodeABC):
 
 
 
-class ExtendVideoNearestFrame(ComfyNodeABC):
+class ResampleVideoNearest(ComfyNodeABC):
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -244,23 +244,19 @@ class ExtendVideoNearestFrame(ComfyNodeABC):
     CATEGORY = "Video/Processing"
 
 
-    # -------------------------------------------------------------
-    # Main function
-    # -------------------------------------------------------------
     def extend(self, video: torch.Tensor, target_length: int):
-
         src_len = video.shape[0]
 
-        # Wenn schon lang genug → nicht ändern
-        if src_len >= target_length:
+        # Degenerater Fall
+        if src_len == 0 or target_length <= 0:
             return (video,)
 
-        # Gleichmäßig verteilte Duplikate erzeugen
+        # Gleichmäßiges Nearest-Neighbor-Resampling
         indices = torch.linspace(
-            0, src_len - 1, target_length,
+            0, src_len - 1,
+            target_length,
             device=video.device
-        ).long()
+        ).round().long().clamp(0, src_len - 1)
 
-        extended = video[indices]
-
-        return (extended,)
+        out = video[indices]
+        return (out,)

@@ -19,6 +19,129 @@ from comfy.utils import ProgressBar
 KASKIS_BASE_DIR = Path(__file__).resolve().parent
 KASKIS_YOLO_MODEL = None
 
+
+class CollectVideosNode(ComfyNodeABC):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "folderpath": ("STRING", {"default": ""}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
+                "useUnbrokenIDs": ("BOOLEAN", {"default": True}),
+                "enableDebugMsg": ("BOOLEAN", {"default": False}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "INT", "IMAGE", "INT", "VIDEO")
+    RETURN_NAMES = ("File-ID", "First Frame", "Best Frame", "Best Frame Index", "Last Frame", "Last Frame Index", "used video")
+    FUNCTION = "run"
+    CATEGORY = "Unbroken"
+
+    def run(self, folderpath: str, index: int, useUnbrokenIDs: bool, enableDebugMsg: bool):
+        
+        if enableDebugMsg:
+            print(f"Unbroken Video Handler: Starting collection at {datetime.now()}")
+            
+        collector = VideoFileCollector(folderpath, useUnbrokenIDs)
+        pbar = ProgressBar(1000)
+        progress = pbar.update_absolute
+        
+
+        if not (0 <= index < len(collector.files)):
+            raise IndexError(f"Index {index} out of range, total files: {len(collector.files)}")
+        
+        video_path, file_id = collector.files[index]
+        progress(50)
+        
+        first_frame, last_frame, last_index = self.extract_first_last_frames(video_path)
+        if enableDebugMsg:
+            print(f"Extracted first and last frame at {datetime.now()}")
+        progress(100)
+        
+        
+        if enableDebugMsg:
+            print(f"Started Video Scoring at {datetime.now()}")
+            
+        analyzer = VideoFaceAnalysis(video_path, last_index, enableDebugMsg, progress)
+        best_frame, best_index = analyzer.get_frames_score_yolo()
+        
+        if enableDebugMsg:
+            print(f"Finished Video Scoring at {datetime.now()}")
+        progress(1000)
+        
+        used_video = VideoFromFile(str(video_path))
+        
+        if enableDebugMsg:
+            print(f"Unbroken Video Handler: Using Entry {index} of {len(collector.files)}, getting filepath {video_path} and file-ID {file_id}")
+            print(f"Unbroken Video Handler: Found best frame at index {best_index}, Index of last Frame is {last_index}")
+            
+        
+        return file_id, first_frame, best_frame, best_index, last_frame, last_index, used_video
+
+
+    def extract_first_last_frames(self, video_path: str):
+        """
+        Liest mit ffmpeg den ersten und letzten Frame eines Videos
+        und gibt (first_tensor, last_tensor, frame_count) zurück.
+
+        Tensorshape: (1, H, W, C) in float32, Werte 0..1
+        """
+
+        # --- Anzahl Frames bestimmen ---
+        # ffprobe liefert die Frame-Anzahl
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-count_frames",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=nb_read_frames",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path
+        ]
+        out = subprocess.check_output(cmd).decode("utf-8").strip()
+        try:
+            frame_count = int(out)
+        except ValueError:
+            raise RuntimeError(f"Keine valide Frame-Anzahl aus ffprobe: {out}")
+
+        if frame_count <= 0:
+            raise RuntimeError("Video hat 0 Frames")
+
+        # ffmpeg-Befehl zum Extrahieren eines spezifischen Frames
+        def extract_frame(index: int):
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", video_path,
+                "-vf", f"select=eq(n\\,{index})",
+                "-vframes", "1",
+                "-f", "image2pipe",
+                "-vcodec", "png",
+                "pipe:1"
+            ]
+            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            img_bytes, _ = pipe.communicate()
+            if pipe.returncode != 0 or not img_bytes:
+                raise RuntimeError(f"Frame {index} konnte nicht extrahiert werden")
+
+            # PNG in numpy
+            nparr = np.frombuffer(img_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)  # BGR
+            if frame is None:
+                raise RuntimeError(f"Decoding des Frames {index} fehlgeschlagen")
+
+            # Convert BGR → RGB + Normalisierung
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            tensor = torch.from_numpy(frame).float() / 255.0  # H,W,C
+            tensor = tensor.unsqueeze(0)  # B,H,W,C (Batch=1)
+            return tensor.contiguous()
+
+        first = extract_frame(0)
+        last = extract_frame(frame_count - 1)
+
+        return first, last, frame_count - 1
+        
+        
 class VideoFileCollector:
     VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".flv", ".mpeg"}
     FILE_PATTERN = re.compile(r"^(\d_\d{2}_\d{2}[A-Za-z]?)")
@@ -122,7 +245,7 @@ class VideoFaceAnalysis:
             xyxy = boxes.xyxy          # Bounding Box Koordinaten
             areas = (xyxy[:, 2] - xyxy[:, 0]) * (xyxy[:, 3] - xyxy[:, 1])
 
-            score = (areas * confs).sum()
+            score = (areas * confs).sum().item()
 
             if score > best_score:
                 best_score, best_frame, best_frame_no = score, frame_rgb, current_frame_idx
@@ -141,122 +264,5 @@ class VideoFaceAnalysis:
         best_frame_torch = transform(best_frame).float()  # C,H,W als Float 0..1
         return best_frame_torch.permute(1, 2, 0).contiguous().unsqueeze(0), best_frame_no
     
-class CollectVideosNode(ComfyNodeABC):
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "folderpath": ("STRING", {"default": ""}),
-                "index": ("INT", {"default": 0, "min": 0, "max": 99999}),
-                "useUnbrokenIDs": ("BOOLEAN", {"default": True}),
-                "enableDebugMsg": ("BOOLEAN", {"default": False}),
-            }
-        }
 
-    RETURN_TYPES = ("STRING", "IMAGE", "IMAGE", "INT", "IMAGE", "INT")
-    RETURN_NAMES = ("File-ID", "First Frame", "Best Frame", "Best Frame Index", "Last Frame", "Last Frame Index")
-    FUNCTION = "run"
-    CATEGORY = "Unbroken"
-
-    def run(self, folderpath: str, index: int, useUnbrokenIDs: bool, enableDebugMsg: bool):
-        
-        if enableDebugMsg:
-            print(f"Unbroken Video Handler: Starting collection at {datetime.now()}")
-            
-        collector = VideoFileCollector(folderpath, useUnbrokenIDs)
-        pbar = ProgressBar(1000)
-        progress = pbar.update_absolute
-        
-
-        if not (0 <= index < len(collector.files)):
-            raise IndexError(f"Index {index} out of range, total files: {len(collector.files)}")
-        
-        video_path, file_id = collector.files[index]
-        progress(50)
-        
-        first_frame, last_frame, last_index = self.extract_first_last_frames(video_path)
-        if enableDebugMsg:
-            print(f"Extracted first and last frame at {datetime.now()}")
-        progress(100)
-        
-        
-        if enableDebugMsg:
-            print(f"Started Video Scoring at {datetime.now()}")
-            
-        analyzer = VideoFaceAnalysis(video_path, last_index, enableDebugMsg, progress)
-        best_frame, best_index = analyzer.get_frames_score_yolo()
-        
-        if enableDebugMsg:
-            print(f"Finished Video Scoring at {datetime.now()}")
-        progress(1000)
-        
-        if enableDebugMsg:
-            print(f"Unbroken Video Handler: Using Entry {index} of {len(collector.files)}, getting filepath {video_path} and file-ID {file_id}")
-            print(f"Unbroken Video Handler: Found best frame at index {best_index}, Index of last Frame is {last_index}")
-            
-        
-        return file_id, first_frame, best_frame, best_index, last_frame, last_index
-
-
-    def extract_first_last_frames(self, video_path: str):
-        """
-        Liest mit ffmpeg den ersten und letzten Frame eines Videos
-        und gibt (first_tensor, last_tensor, frame_count) zurück.
-
-        Tensorshape: (1, H, W, C) in float32, Werte 0..1
-        """
-
-        # --- Anzahl Frames bestimmen ---
-        # ffprobe liefert die Frame-Anzahl
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-count_frames",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=nb_read_frames",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path
-        ]
-        out = subprocess.check_output(cmd).decode("utf-8").strip()
-        try:
-            frame_count = int(out)
-        except ValueError:
-            raise RuntimeError(f"Keine valide Frame-Anzahl aus ffprobe: {out}")
-
-        if frame_count <= 0:
-            raise RuntimeError("Video hat 0 Frames")
-
-        # ffmpeg-Befehl zum Extrahieren eines spezifischen Frames
-        def extract_frame(index: int):
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-i", video_path,
-                "-vf", f"select=eq(n\\,{index})",
-                "-vframes", "1",
-                "-f", "image2pipe",
-                "-vcodec", "png",
-                "pipe:1"
-            ]
-            pipe = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            img_bytes, _ = pipe.communicate()
-            if pipe.returncode != 0 or not img_bytes:
-                raise RuntimeError(f"Frame {index} konnte nicht extrahiert werden")
-
-            # PNG in numpy
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)  # BGR
-            if frame is None:
-                raise RuntimeError(f"Decoding des Frames {index} fehlgeschlagen")
-
-            # Convert BGR → RGB + Normalisierung
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            tensor = torch.from_numpy(frame).float() / 255.0  # H,W,C
-            tensor = tensor.unsqueeze(0)  # B,H,W,C (Batch=1)
-            return tensor.contiguous()
-
-        first = extract_frame(0)
-        last = extract_frame(frame_count - 1)
-
-        return first, last, frame_count
 
