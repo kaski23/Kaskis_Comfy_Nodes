@@ -278,19 +278,28 @@ class WanVaceInputConform(ComfyNodeABC):
     FUNCTION = "conform"
     CATEGORY = "Video/Conforming"
 
-    def conform(self, images):
+     def conform(self, images):
         # --- Ensure tensor ---
         if isinstance(images, list):
             images = torch.stack(images, dim=0)
 
         B, H, W, C = images.shape
 
-        # --- Frame count: extend to (4n + 1) ---
+        # --- Frame count: extend to (4n + 1) using ping-pong ---
         remainder = (B - 1) % 4
         if remainder != 0:
             needed = 4 - remainder
-            last_frame = images[-1:].repeat(needed, 1, 1, 1)
-            images = torch.cat([images, last_frame], dim=0)
+
+            # reverse WITHOUT duplicating last frame
+            reverse = images[-2::-1] if B > 1 else images
+
+            # repeat reverse if needed
+            extended = []
+            while len(extended) < needed:
+                extended.append(reverse)
+            extended = torch.cat(extended, dim=0)[:needed]
+
+            images = torch.cat([images, extended], dim=0)
 
         # --- Resolution buckets ---
         allowed_resolutions = [
@@ -309,14 +318,12 @@ class WanVaceInputConform(ComfyNodeABC):
             scale_w = rw / W
             scale_h = rh / H
 
-            # only allow upscaling
             if scale_w < 1 or scale_h < 1:
                 return float("inf")
 
             return max(scale_w, scale_h)
 
         best_res = min(allowed_resolutions, key=score)
-
         width, height = best_res
 
         return (images, width, height)
