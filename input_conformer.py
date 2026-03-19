@@ -308,8 +308,8 @@ class WanVaceInputConform(ComfyNodeABC):
 
         # --- Resolution buckets ---
         allowed_resolutions = [
-            (468, 840),
-            (840, 468),
+            (480, 832),
+            (832, 480),
             (512, 512),
             (768, 768),
             (1024, 1024),
