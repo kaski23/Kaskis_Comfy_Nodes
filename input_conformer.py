@@ -290,15 +290,20 @@ class WanVaceInputConform(ComfyNodeABC):
         if remainder != 0:
             needed = 4 - remainder
 
-            # reverse WITHOUT duplicating last frame
-            reverse = images[-2::-1] if B > 1 else images
+            if B > 1:
+                # exclude last frame, then flip
+                reverse = torch.flip(images[:-1], dims=[0])
+            else:
+                reverse = images
 
-            # repeat reverse if needed
-            extended = []
-            while len(extended) < needed:
-                extended.append(reverse)
-            extended = torch.cat(extended, dim=0)[:needed]
+            # build ping-pong extension
+            chunks = []
+            total = 0
+            while total < needed:
+                chunks.append(reverse)
+                total += reverse.shape[0]
 
+            extended = torch.cat(chunks, dim=0)[:needed]
             images = torch.cat([images, extended], dim=0)
 
         # --- Resolution buckets ---
@@ -312,12 +317,13 @@ class WanVaceInputConform(ComfyNodeABC):
             (720, 1280),
         ]
 
-        # --- Find best fitting resolution (smallest upscale) ---
+        # --- Find best fitting resolution (smallest upscale only) ---
         def score(res):
             rw, rh = res
             scale_w = rw / W
             scale_h = rh / H
 
+            # only allow upscaling
             if scale_w < 1 or scale_h < 1:
                 return float("inf")
 
