@@ -278,7 +278,7 @@ class WanVaceInputConform(ComfyNodeABC):
     FUNCTION = "conform"
     CATEGORY = "Video/Conforming"
 
-     def conform(self, images):
+    def conform(self, images):
         # --- Ensure tensor ---
         if isinstance(images, list):
             images = torch.stack(images, dim=0)
