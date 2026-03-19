@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 import math
 import torch.nn.functional as F
 from comfy.comfy_types import ComfyNodeABC
@@ -23,7 +24,7 @@ class ConformVideo(ComfyNodeABC):
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "sanitize"
-    CATEGORY = "Kling/Video"
+    CATEGORY = "Video/Conforming"
 
 
     # -------------------------------------------------------------
@@ -178,7 +179,7 @@ class ConformAudio(ComfyNodeABC):
 
     RETURN_TYPES = ("AUDIO",)
     FUNCTION = "conform"
-    CATEGORY = "Audio/Processing"
+    CATEGORY = "Video/Conforming"
 
 
     # -------------------------------------------------------------
@@ -241,7 +242,7 @@ class ResampleVideoNearest(ComfyNodeABC):
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "extend"
-    CATEGORY = "Video/Processing"
+    CATEGORY = "Video/Conforming"
 
 
     def extend(self, video: torch.Tensor, target_length: int):
@@ -260,3 +261,62 @@ class ResampleVideoNearest(ComfyNodeABC):
 
         out = video[indices]
         return (out,)
+        
+
+
+class WanVaceInputConform(ComfyNodeABC):
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),  # (B, H, W, C)
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "INT", "INT")
+    RETURN_NAMES = ("images", "width", "height")
+    FUNCTION = "conform"
+    CATEGORY = "Video/Conforming"
+
+    def conform(self, images):
+        # --- Ensure tensor ---
+        if isinstance(images, list):
+            images = torch.stack(images, dim=0)
+
+        B, H, W, C = images.shape
+
+        # --- Frame count: extend to (4n + 1) ---
+        remainder = (B - 1) % 4
+        if remainder != 0:
+            needed = 4 - remainder
+            last_frame = images[-1:].repeat(needed, 1, 1, 1)
+            images = torch.cat([images, last_frame], dim=0)
+
+        # --- Resolution buckets ---
+        allowed_resolutions = [
+            (468, 840),
+            (840, 468),
+            (512, 512),
+            (768, 768),
+            (1024, 1024),
+            (1280, 720),
+            (720, 1280),
+        ]
+
+        # --- Find best fitting resolution (smallest upscale) ---
+        def score(res):
+            rw, rh = res
+            scale_w = rw / W
+            scale_h = rh / H
+
+            # only allow upscaling
+            if scale_w < 1 or scale_h < 1:
+                return float("inf")
+
+            return max(scale_w, scale_h)
+
+        best_res = min(allowed_resolutions, key=score)
+
+        width, height = best_res
+
+        return (images, width, height)
