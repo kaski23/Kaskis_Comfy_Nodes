@@ -318,18 +318,32 @@ class WanVaceInputConform(ComfyNodeABC):
         ]
 
         # --- Find best fitting resolution (smallest upscale only) ---
-        def score(res):
-            rw, rh = res
-            scale_w = rw / W
-            scale_h = rh / H
+        def score():
+            aspect_ratio_video = W / H
+            scores = []
 
-            # only allow upscaling
-            if scale_w < 1 or scale_h < 1:
-                return float("inf")
+            for w, h in allowed_resolutions:
+                aspect_ratio_bucket = w / h
+                aspect_penalty = (aspect_ratio_bucket - aspect_ratio_video) ** 2
 
-            return max(scale_w, scale_h)
+                width_diff = w - W
+                height_diff = h - H
 
-        best_res = min(allowed_resolutions, key=score)
-        width, height = best_res
+                scale_penalty = 0
+                if width_diff < 0:
+                    scale_penalty += (width_diff ** 2) * 2  # Downscale härter bestrafen
+                else:
+                    scale_penalty += width_diff
 
+                if height_diff < 0:
+                    scale_penalty += (height_diff ** 2) * 2
+                else:
+                    scale_penalty += height_diff
+
+                scores.append(scale_penalty + aspect_penalty * 1000)
+            return scores
+                
+        scores = score()
+        best_idx = int(np.argmin(scores))
+        width, height = allowed_resolutions[best_idx]
         return (images, width, height)
